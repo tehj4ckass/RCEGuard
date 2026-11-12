@@ -1,25 +1,88 @@
-# Build output
+# --- Build output ---------------------------------------------------------------------------
 bin/
 obj/
 artifacts/
 publish/
+*.binlog
+msbuild.log
+msbuild.err
+msbuild.wrn
 
-# IDE
+# --- Test results and coverage --------------------------------------------------------------
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+BenchmarkDotNet.Artifacts/
+
+# --- NuGet -----------------------------------------------------------------------------------
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+project.lock.json
+nuget.config.local
+
+# --- IDEs and editors ------------------------------------------------------------------------
 .vs/
+.vscode/
 .idea/
 *.user
 *.suo
+*.userprefs
+*.sln.docstates
+*.DotSettings.user
+_ReSharper*/
+*.swp
+*~
 
-# Rendered Sysmon configurations and local test data (contain local paths)
-sysmon/*.rendered.xml
+# --- Windows ---------------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- Local test data: contains user names, machine names, SIDs and local paths ---------------
+# Recorded events only enter the repository anonymised, as fixtures under tests/.
 out/
+sysmon/*.rendered.xml
+*.evtx
+*.etl
+*.dmp
+*.log
 
-# Secrets and local settings never belong in the repository
-.env
-appsettings.local.json
+# --- Sysmon is never shipped with this repository (downloaded from Microsoft at install) -----
+Sysmon.zip
+Sysmon.exe
+Sysmon64.exe
+Sysmon64a.exe
+SysmonDrv.sys
+
+# --- Runtime data of the guard (lives in C:\ProgramData\RCEGuard, never in the repository) ---
+install-state.json
+sysmon-config.xml
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 
-# Local agent session state
-.claude/autoharness/
+# --- Secrets and local settings --------------------------------------------------------------
+.env
+.env.*
+!.env.example
+appsettings.local.json
+appsettings.*.local.json
+*.pfx
+*.p12
+*.key
+*.pem
+secrets.json
+
+# --- Agent tooling: generated session state and skills, may quote local sessions -------------
+.claude/
+graphify-out/
