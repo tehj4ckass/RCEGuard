@@ -272,4 +272,28 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   `findings.db` (`repeats`, `last_time_utc`). Nach dem Fenster wird neu gemeldet, mit der Zahl der zurückgehaltenen
   Wiederholungen. Befunde mit Beenden werden nie zurückgehalten. Ein neuer Start des Clients ist ein neuer Prozess und
   alarmiert wieder. Gerechnet wird mit der Zeit der Ereignisse, damit ein Replay sich wie der Live-Lauf verhält.
-- **Offen in M2:** Abnahme der beiden Punkte im installierten Dienst; Lesezeichen im Sysmon-Log (siehe oben).
+- **Abnahme im installierten Dienst (12.11.2026, dritter Lauf mit `-InstalledService`).** Alle sechs Szenarien bestanden
+  (0,57 bis 1,09 s), dazu Registrierung und Neustart. `detach`: `cmd.exe (36060): already exited, left behind:
+  cmd.exe (544) terminated`, kein Programm mit der Testmarke lief weiter. Die Spalten `repeats` und `last_time_utc`
+  wurden in der vorhandenen `findings.db` ergänzt.
+- **Entprellen im installierten Dienst (12.11.2026, ohne Admin-Rechte direkt mit dem Simulator geprüft).** Neuer Schalter
+  `--repeat [Anzahl]` wiederholt ein Szenario im selben Prozess. Drei Verbindungen zu derselben Adresse bei laufendem
+  Client: eine Meldung im Log, `repeats = 2` am Befund. Das Abnahmeskript hat dafür das siebte Szenario `repeat`
+  (genau eine R2-Meldung); es lief bisher nur gegen den Ersatz-Dienst (PowerShell 7 und 5.1, dazu eine Fehlvariante mit
+  drei Meldungen, die durchfällt), noch nicht als Administrator.
+- **R2: Verbindungen kommen spät und manchmal gar nicht (12.11.2026).** Zwei Beobachtungen aus dieser Prüfung:
+  - *Verzögerung im Sensor.* Sysmon schreibt eine Verbindung 1,6 bis 2,0 s nach dem Verbindungsaufbau ins Log (fünf
+    aufgezeichnete Ereignisse, `UtcTime` gegen `TimeCreated`). Der Befund entsteht also rund 2,5 bis 3 s nach der
+    Verbindung. Die Angabe „ms after the event“ im Log rechnet ab dem Log-Eintrag und zeigt das nicht; das
+    Abnahmekriterium (2 s) gilt bei R2 deshalb nur für die Strecke ab dem Log-Eintrag.
+  - *Fehlende Meldungen.* Eine einzelne Verbindung wurde nicht gemeldet, wenn der Client kurz danach endete: sofort
+    oder nach 1 s in 6 von 6 Versuchen, nach 3 s in 2 von 6, nach 8 s nie (4 von 4 gemeldet). Bei mehreren Verbindungen
+    ohne Wartezeit fehlte jeweils genau eine (3 → 2, 6 → 5). Im M1-Mitschnitt wurde eine solche Verbindung dagegen
+    aufgezeichnet. Die Regel im Dienst hängt nicht davon ab, ob der Prozess noch läuft; die Vermutung ist deshalb, dass
+    Sysmon das Ereignis nicht schreibt, wenn es den Prozess beim späten Auswerten nicht mehr zuordnen kann. Bestätigt ist
+    das nicht: Dazu fehlt der Blick ins Sysmon-Log (`show-events.ps1 -Id 3`, nur als Administrator).
+  - *Folge.* Der echte Client läuft lange, seine eigenen Verbindungen sind davon nicht betroffen; eine kurze Verbindung
+    unmittelbar vor dem Ende des Clients kann fehlen. R2 mit `killOnUnknownRemote` käme in jedem Fall erst nach rund 3 s.
+    Verhindern können unbekannte Verbindungen nur die Firewall-Regeln aus M3.
+- **Offen in M2:** Ursache der fehlenden R2-Meldungen klären; Szenario `repeat` als Administrator laufen lassen;
+  Lesezeichen im Sysmon-Log (siehe oben).

@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks and the restart by Windows after the service process was ended. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. Terminating what an exited child left behind and counting repeated alerts are built and tested against real processes, **but not yet run in the installed service**. Toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. Counting repeated alerts was checked in the installed service by hand (three connections: one report, two counted); its acceptance scenario `repeat` has so far only run against a stand-in guard. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. **Known gap, cause not confirmed:** a connection of a client that ends within a few seconds is often not reported at all, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -76,6 +76,9 @@ C:\RCEGuardTest\Wow.exe --spawn
 | `--miner-args` | starts a child with `stratum+tcp://` in its arguments | id 1, rule `R1` (Sysmon names only the first matching rule) |
 | `--detach` | starts a child that starts a waiting program and exits at once; the program runs on for about 5 s | id 1, rule `R1` for the child only (Sysmon does not report what the child starts) |
 
+Add `--repeat [count]` (default 3) to run a scenario several times in the same process, for
+example `--connect --repeat 3`: the guard should report the alert once and count the rest.
+
 Every child process also produces an id 10 event (rule `R7`, the client holds a handle to its
 child) and an id 13 event for a Windows bookkeeping key under `Services\bam`. Both are expected.
 
@@ -84,6 +87,9 @@ Save the recorded events as XML, for example as raw material for test fixtures:
 ```powershell
 .\scripts\show-events.ps1 -Last 200 -OutFile out\events.xml
 ```
+
+`-Id` limits both the display and the saved file to some event ids, for example `-Id 3` for
+network connections.
 
 ## Running the guard
 
@@ -193,16 +199,29 @@ folder, started with nothing but a console handle on its command line. Windows s
 for every console program that gets its own console. `conhost.exe` with any other arguments (it
 can start other programs) is an ordinary R1.
 
-Findings arrive 0.7 to 1.1 seconds after the event (measured in the acceptance test), because
+Findings arrive 0.6 to 1.1 seconds after the log entry (measured in the acceptance test), because
 Windows delivers log entries in batches. A child process therefore runs for about a second before it is terminated; stopping it
 from starting at all is the job of M3.
+
+**Connections (R2) are slower and can be missed.** Sysmon writes a network connection to its log
+1.6 to 2.0 seconds after the connection was made (five recorded events), so an R2 finding comes
+about 2.5 to 3 seconds after the connection; the "ms after the event" in the log line counts
+from the log entry and does not show this. In tests on 2026-11-12 a connection was not reported
+at all when the client ended soon afterwards: never when it ended within a second (6 of 6
+missed), in 2 of 6 runs when it lived 3 more seconds, always when it lived 8 seconds (4 of 4
+reported). Whether Sysmon drops these events or the service does is not confirmed yet. The game
+client itself runs for a long time, so its own connections are not affected by this; a short
+connection right before the client ends may be. Blocking unknown addresses in advance is the job
+of the firewall rules in M3.
 
 The guard stops with an error instead of idling if it cannot read the Sysmon log.
 
 ### Acceptance test
 
-Runs all simulator scenarios against the running guard and checks that each one is detected
-within 2 s and that the critical ones are terminated. In an administrator PowerShell, after
+Runs seven simulator scenarios against the running guard and checks that each one is detected
+within 2 s of its log entry, that the critical ones are terminated, that a program left behind
+by an exited child is gone (`detach`) and that three identical connections of one client are
+reported once (`repeat`). In an administrator PowerShell, after
 `.\build.ps1` and publishing the simulator:
 
 ```powershell

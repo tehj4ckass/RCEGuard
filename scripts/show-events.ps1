@@ -11,6 +11,9 @@
 .PARAMETER Last
     Number of most recent events to show first.
 
+.PARAMETER Id
+    Only events with these Sysmon event ids, e.g. 3 for network connections.
+
 .PARAMETER Follow
     Keeps running and prints new events as they arrive (Ctrl+C to stop).
 
@@ -23,10 +26,14 @@
 
 .EXAMPLE
     .\show-events.ps1 -Last 200 -OutFile out\events.xml
+
+.EXAMPLE
+    .\show-events.ps1 -Last 60 -Id 3 -OutFile out\connections.xml
 #>
 [CmdletBinding()]
 param(
     [int] $Last = 30,
+    [int[]] $Id,
     [switch] $Follow,
     [switch] $Raw,
     [string] $OutFile
@@ -36,11 +43,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $logName = 'Microsoft-Windows-Sysmon/Operational'
+# Restricts a query to the event ids asked for; empty without -Id.
+$idClause = if ($Id) { '(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')' } else { '' }
+$recentQuery = if ($idClause) { "*[System[$idClause]]" } else { '*' }
 
 if ($OutFile) {
     if ($Follow) { throw '-OutFile cannot be combined with -Follow.' }
 
-    $saved = @(Get-WinEvent -LogName $logName -MaxEvents $Last -ErrorAction SilentlyContinue)
+    $saved = @(Get-WinEvent -LogName $logName -FilterXPath $recentQuery -MaxEvents $Last -ErrorAction SilentlyContinue)
     [array]::Reverse($saved)
     $lines = [Collections.Generic.List[string]]::new()
     $lines.Add('<?xml version="1.0" encoding="utf-8"?>')
@@ -89,7 +99,7 @@ function Format-SysmonEvent($entry) {
     '{0:HH:mm:ss.fff}  id={1,-2}  rule={2,-12}  {3}' -f $entry.TimeCreated, $entry.Id, $ruleName, ($details -join '  ')
 }
 
-$recent = @(Get-WinEvent -LogName $logName -MaxEvents $Last -ErrorAction SilentlyContinue)
+$recent = @(Get-WinEvent -LogName $logName -FilterXPath $recentQuery -MaxEvents $Last -ErrorAction SilentlyContinue)
 [array]::Reverse($recent)
 $lastRecordId = 0
 foreach ($entry in $recent) {
@@ -103,7 +113,7 @@ if (-not $Follow) { return }
 Write-Host '--- waiting for new events (Ctrl+C to stop) ---'
 while ($true) {
     Start-Sleep -Milliseconds 500
-    $query = "*[System[EventRecordID > $lastRecordId]]"
+    $query = if ($idClause) { "*[System[EventRecordID > $lastRecordId and $idClause]]" } else { "*[System[EventRecordID > $lastRecordId]]" }
     $new = @(Get-WinEvent -LogName $logName -FilterXPath $query -Oldest -ErrorAction SilentlyContinue)
     foreach ($entry in $new) {
         Format-SysmonEvent $entry

@@ -27,19 +27,21 @@ internal static class Program
             return args.Length == 0 ? 2 : 0;
         }
 
-        var holdIndex = Array.IndexOf(args, "--hold");
-        if (holdIndex > 0)
+        holdSeconds = TakeOption(ref args, "--hold", whenBare: 15) ?? 0;
+        var runs = Math.Clamp(TakeOption(ref args, "--repeat", whenBare: 3) ?? 1, 1, 100);
+
+        var exitCode = 0;
+        for (var run = 1; run <= runs && exitCode == 0; run++)
         {
-            var hasValue = holdIndex + 1 < args.Length && int.TryParse(args[holdIndex + 1], out holdSeconds);
-            if (!hasValue)
+            if (run > 1)
             {
-                holdSeconds = 15;
+                // Far enough apart for the sensor to record each run as an event of its own.
+                Thread.Sleep(300);
             }
 
-            args = args[..holdIndex];
+            exitCode = RunScenario(args);
         }
 
-        var exitCode = RunScenario(args);
         if (exitCode != 0 || holdSeconds <= 0)
         {
             return exitCode;
@@ -49,6 +51,24 @@ internal static class Program
         Thread.Sleep(TimeSpan.FromSeconds(holdSeconds));
         Console.WriteLine("NOT TERMINATED: nothing stopped this process.");
         return 3;
+    }
+
+    /// <summary>
+    /// Removes "name [number]" from the arguments (never the scenario at index 0) and returns the
+    /// number, <paramref name="whenBare"/> if the option stands alone, or null if it is absent.
+    /// </summary>
+    private static int? TakeOption(ref string[] args, string name, int whenBare)
+    {
+        var index = Array.IndexOf(args, name);
+        if (index <= 0)
+        {
+            return null;
+        }
+
+        var hasValue = index + 1 < args.Length && int.TryParse(args[index + 1], out _);
+        var value = hasValue ? int.Parse(args[index + 1]) : whenBare;
+        args = [.. args[..index], .. args[(index + (hasValue ? 2 : 1))..]];
+        return value;
     }
 
     private static int RunScenario(string[] args)
@@ -112,6 +132,8 @@ internal static class Program
             Add '--hold [seconds]' (default 15) after a scenario to keep this process, and for
             --spawn its child and for --detach the left-behind program, running: a guard then has
             something left to terminate.
+            Add '--repeat [count]' (default 3) to run the scenario several times in this one
+            process: a guard should report the same alert once and count the rest.
             Exit codes: 0 scenario done, 1 scenario blocked, 3 held and not terminated.
             """);
     }

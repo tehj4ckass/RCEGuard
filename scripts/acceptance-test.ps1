@@ -115,14 +115,16 @@ $eventsFile = Join-Path $OutDir 'm2-events.xml'
 # The log the findings are read from: the installed service's own log, or the console output of the instance started here.
 $serviceLog = if ($InstalledService) { $GuardLog } else { Join-Path $OutDir 'm2-service.log' }
 
-# Scenario, expected rules, and whether the guard must terminate the client.
+# Scenario, expected rules, whether the guard must terminate the client, and whether the scenario
+# raises the same alert several times in one client, which the guard must report only once.
 $scenarios = @(
-    [pscustomobject]@{ Name = 'spawn';      Arguments = @('--spawn');                  Rules = @('R1');       MustDie = $true }
-    [pscustomobject]@{ Name = 'miner-args'; Arguments = @('--miner-args');             Rules = @('R1', 'R9'); MustDie = $true }
-    [pscustomobject]@{ Name = 'detach';     Arguments = @('--detach');                 Rules = @('R1');       MustDie = $true }
-    [pscustomobject]@{ Name = 'runkey';     Arguments = @('--runkey');                 Rules = @('R4');       MustDie = $true }
-    [pscustomobject]@{ Name = 'connect';    Arguments = @('--connect', '1.1.1.1:443'); Rules = @('R2');       MustDie = $false }
-    [pscustomobject]@{ Name = 'drop';       Arguments = @('--drop');                   Rules = @('R3');       MustDie = $false }
+    [pscustomobject]@{ Name = 'spawn';      Arguments = @('--spawn');                                 Rules = @('R1');       MustDie = $true;  Once = $false }
+    [pscustomobject]@{ Name = 'miner-args'; Arguments = @('--miner-args');                            Rules = @('R1', 'R9'); MustDie = $true;  Once = $false }
+    [pscustomobject]@{ Name = 'detach';     Arguments = @('--detach');                                Rules = @('R1');       MustDie = $true;  Once = $false }
+    [pscustomobject]@{ Name = 'runkey';     Arguments = @('--runkey');                                Rules = @('R4');       MustDie = $true;  Once = $false }
+    [pscustomobject]@{ Name = 'connect';    Arguments = @('--connect', '1.1.1.1:443');                Rules = @('R2');       MustDie = $false; Once = $false }
+    [pscustomobject]@{ Name = 'drop';       Arguments = @('--drop');                                  Rules = @('R3');       MustDie = $false; Once = $false }
+    [pscustomobject]@{ Name = 'repeat';     Arguments = @('--connect', '1.1.1.1:443', '--repeat', '3'); Rules = @('R2');     MustDie = $false; Once = $true }
 )
 
 # The program the --detach scenario leaves behind carries this text on its command line.
@@ -245,13 +247,15 @@ try {
         $detected = $missing.Count -eq 0
         $inTime = $detected -and $maxDelay -lt 2000
         $killOk = if ($scenario.MustDie) { $outcome -eq 'terminated' } else { $outcome -eq 'survived' }
+        # The client has ended, so every repetition is long past the guard: more than one report means it did not count them.
+        $onceOk = -not $scenario.Once -or $relevant.Count -eq 1
         $results += [pscustomobject]@{
             Scenario = $scenario.Name
-            Expected = ($scenario.Rules -join '+') + $(if ($scenario.MustDie) { ', terminated' } else { ', alert only' })
-            Found    = ($foundRules -join '+')
+            Expected = ($scenario.Rules -join '+') + $(if ($scenario.MustDie) { ', terminated' } else { ', alert only' }) + $(if ($scenario.Once) { ', reported once' } else { '' })
+            Found    = ($foundRules -join '+') + $(if ($scenario.Once -and $relevant.Count -ne 1) { " ($($relevant.Count) reports)" } else { '' })
             DelayMs  = $maxDelay
             Client   = $outcome
-            Result   = if ($detected -and $inTime -and $killOk) { 'PASS' } else { 'FAIL' }
+            Result   = if ($detected -and $inTime -and $killOk -and $onceOk) { 'PASS' } else { 'FAIL' }
         }
     }
 
