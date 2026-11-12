@@ -190,3 +190,22 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   ist das eine eigene Warnung, weil eingeschleuster Code dann den Dienst angreifen könnte.
 - **Menge:** Rund 33 ImageLoad-Ereignisse je Start des Simulators, sonst nur einzelne Ereignisse je Szenario.
 - **Testdaten:** Die Ereignisse enthalten Benutzername, SID und Anmelde-IDs. Fixtures werden vor dem Einchecken anonymisiert.
+
+## 14. Entscheidungen bei der Umsetzung von M2
+
+- **R9 außerhalb des Clients nur Alarm.** Die Sysmon-Regel für Miner-Kommandozeilen gilt maschinenweit. Beendet wird nur ein
+  Prozess, den der Client gestartet hat; bei fremden Prozessen ist der Treffer ein Textvergleich ohne Bezug zum Client
+  (ein Editor mit einer Datei `xmrig-notizen.txt` würde sonst beendet).
+- **R3 und R5 abgestuft.** Programmdateien und Startup-Ordner alarmieren (HOCH), sonstige Dateien außerhalb des Spielordners
+  werden nur protokolliert (MITTEL), bis der Lernmodus zeigt, was der echte Client schreibt. Unsignierte Module aus dem
+  Spielordner sind kein Befund (die Bibliotheken des Clients sind oft unsigniert); das Ablegen dort fängt R3 ab.
+- **R2 ohne Allowlist alarmiert jede Verbindung**, beendet aber nur mit `killOnUnknownRemote`. Loopback ist immer erlaubt.
+- **Beenden nur nach Prüfung.** Ein Prozess wird nur beendet, wenn seine PID noch das Programm aus dem Ereignis ausführt.
+  Geprüft wird über `QueryFullProcessImageName` mit eingeschränktem Handle, ohne den Speicher des Prozesses zu lesen.
+- **Fail closed.** Kann der Dienst das Sysmon-Log nicht lesen (fehlt, kein Zugriff, Abo bricht ab), endet er mit Fehler,
+  statt ohne Ereignisse weiterzulaufen. Eine nicht lesbare Zieladresse gilt bei R2 als nicht erlaubt.
+- **Toast erst in M4.** Ein Dienst in Sitzung 0 kann keine Toasts anzeigen; das übernimmt die Tray-App. Bis dahin steht ein
+  Alarm in der Konsole bzw. im Log und in `findings.db`.
+- **Regelidee „Client läuft als Administrator“** (Abschnitt 13) ist nicht umgesetzt und wartet auf eine Entscheidung.
+- **Offen in M2:** Registrierung als Windows-Dienst (`LocalSystem`) in `install.ps1`/`uninstall.ps1`, Verfolgung von
+  Enkelprozessen, Entprellen wiederholter Alarme.

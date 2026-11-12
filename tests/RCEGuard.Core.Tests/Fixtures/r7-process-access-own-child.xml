@@ -1,0 +1,33 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>10</EventID>
+    <Version>3</Version>
+    <Level>4</Level>
+    <Task>10</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-12T14:04:58.4333442Z" />
+    <EventRecordID>26</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="36052" ThreadID="39968" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">R7</Data>
+    <Data Name="UtcTime">2026-11-12 14:04:58.432</Data>
+    <Data Name="SourceProcessGUID">{11111111-c78a-6af5-4888-030000006801}</Data>
+    <Data Name="SourceProcessId">25544</Data>
+    <Data Name="SourceThreadId">20588</Data>
+    <Data Name="SourceImage">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="TargetProcessGUID">{11111111-c78a-6af5-4988-030000006801}</Data>
+    <Data Name="TargetProcessId">33884</Data>
+    <Data Name="TargetImage">C:\WINDOWS\SYSTEM32\cmd.exe</Data>
+    <Data Name="GrantedAccess">0x1fffff</Data>
+    <Data Name="CallTrace">C:\WINDOWS\SYSTEM32\ntdll.dll+167df4|C:\WINDOWS\System32\KERNELBASE.dll+6e8f5|C:\WINDOWS\System32\KERNELBASE.dll+6b6d6|C:\WINDOWS\System32\KERNEL32.DLL+3c884|C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.34\System.Diagnostics.Process.dll+da06|C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.34\System.Diagnostics.Process.dll+1947f|C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.34\System.Diagnostics.Process.dll+17523|UNKNOWN(00007FF96CEC3B70)</Data>
+    <Data Name="SourceUser">TESTPC\player</Data>
+    <Data Name="TargetUser">TESTPC\player</Data>
+  </EventData>
+</Event>

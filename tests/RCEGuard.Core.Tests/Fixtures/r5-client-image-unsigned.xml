@@ -1,0 +1,36 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>7</EventID>
+    <Version>3</Version>
+    <Level>4</Level>
+    <Task>7</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-12T14:04:58.3126691Z" />
+    <EventRecordID>4</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="36052" ThreadID="21708" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">R5</Data>
+    <Data Name="UtcTime">2026-11-12 14:04:58.285</Data>
+    <Data Name="ProcessGuid">{11111111-c78a-6af5-4888-030000006801}</Data>
+    <Data Name="ProcessId">25544</Data>
+    <Data Name="Image">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="ImageLoaded">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="FileVersion">1.0.0.0</Data>
+    <Data Name="Description">Wow</Data>
+    <Data Name="Product">Wow</Data>
+    <Data Name="Company">Wow</Data>
+    <Data Name="OriginalFileName">Wow.dll</Data>
+    <Data Name="Hashes">SHA256=20DE020B7DD6709F3A6FBAE5C8C27DB4E16C70D7FE8B44E24CFA1DAB6C8853FC</Data>
+    <Data Name="Signed">false</Data>
+    <Data Name="Signature">-</Data>
+    <Data Name="SignatureStatus">Unavailable</Data>
+    <Data Name="User">TESTPC\player</Data>
+  </EventData>
+</Event>

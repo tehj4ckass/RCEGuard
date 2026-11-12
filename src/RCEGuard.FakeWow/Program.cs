@@ -15,6 +15,9 @@ internal static class Program
     private const string RunValueName = "RCEGuardTest";
     private const string DropFileName = "rceguard-test.exe";
 
+    /// <summary>Seconds to stay alive after the scenario (--hold), so a guard has time to terminate this process.</summary>
+    private static int holdSeconds;
+
     private static int Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "/?")
@@ -23,6 +26,32 @@ internal static class Program
             return args.Length == 0 ? 2 : 0;
         }
 
+        var holdIndex = Array.IndexOf(args, "--hold");
+        if (holdIndex > 0)
+        {
+            var hasValue = holdIndex + 1 < args.Length && int.TryParse(args[holdIndex + 1], out holdSeconds);
+            if (!hasValue)
+            {
+                holdSeconds = 15;
+            }
+
+            args = args[..holdIndex];
+        }
+
+        var exitCode = RunScenario(args);
+        if (exitCode != 0 || holdSeconds <= 0)
+        {
+            return exitCode;
+        }
+
+        Console.WriteLine($"Staying alive for {holdSeconds} s so a guard can terminate this process ...");
+        Thread.Sleep(TimeSpan.FromSeconds(holdSeconds));
+        Console.WriteLine("NOT TERMINATED: nothing stopped this process.");
+        return 3;
+    }
+
+    private static int RunScenario(string[] args)
+    {
         try
         {
             switch (args[0])
@@ -73,11 +102,23 @@ internal static class Program
               --runkey                set and remove an HKCU Run value    -> R4 autostart key
               --cpu [seconds]         full load on all cores (300 s)      -> R8 background CPU
               --miner-args            child with 'stratum+tcp://' argument -> R9 miner command line
+
+            Add '--hold [seconds]' (default 15) after a scenario to keep this process, and for
+            --spawn also its child, running: a guard then has something left to terminate.
+            Exit codes: 0 scenario done, 1 scenario blocked, 3 held and not terminated.
             """);
     }
 
     private static void Spawn()
     {
+        if (holdSeconds > 0)
+        {
+            // A child that lives long enough to be terminated, with a grandchild (ping) below it.
+            Console.WriteLine($"R1: starting a child process that runs for about {holdSeconds} s.");
+            RunChild($"/c ping -n {holdSeconds + 1} 127.0.0.1 > nul");
+            return;
+        }
+
         Console.WriteLine("R1: starting a child process (cmd.exe /c echo).");
         RunChild("/c echo RCEGuard child process test");
     }

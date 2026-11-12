@@ -48,6 +48,12 @@ if (-not $sysmonPresent) {
 }
 elseif ($state.sysmonInstalledByRceGuard) {
     Invoke-Sysmon $sysmonExe @('-u') 'Sysmon uninstall'
+    # 'sysmon -u' removes service and driver but leaves its own binary in the Windows folder.
+    $windowsDir = [IO.Path]::GetFullPath($env:windir).TrimEnd('\')
+    $leftInWindows = [string]::Equals([IO.Path]::GetDirectoryName($sysmonExe), $windowsDir, [StringComparison]::OrdinalIgnoreCase)
+    if ($leftInWindows -and (Test-Path -LiteralPath $sysmonExe -PathType Leaf)) {
+        Remove-Item -LiteralPath $sysmonExe -Force
+    }
     Write-Host 'Sysmon uninstalled.'
 }
 else {

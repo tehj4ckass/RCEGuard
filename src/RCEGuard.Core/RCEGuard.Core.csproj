@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Rule engine, models and configuration. No operating system dependencies: testable everywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>RCEGuard.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>

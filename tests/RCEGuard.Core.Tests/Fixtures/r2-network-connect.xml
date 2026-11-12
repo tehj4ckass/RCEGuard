@@ -1,0 +1,38 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>3</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>3</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-12T14:05:03.8703468Z" />
+    <EventRecordID>79</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="36052" ThreadID="832" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">R2</Data>
+    <Data Name="UtcTime">2026-11-12 14:05:02.172</Data>
+    <Data Name="ProcessGuid">{11111111-c78e-6af5-6a88-030000006801}</Data>
+    <Data Name="ProcessId">33912</Data>
+    <Data Name="Image">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="User">TESTPC\player</Data>
+    <Data Name="Protocol">tcp</Data>
+    <Data Name="Initiated">true</Data>
+    <Data Name="SourceIsIpv6">false</Data>
+    <Data Name="SourceIp">192.168.178.57</Data>
+    <Data Name="SourceHostname">TESTPC.fritz.box</Data>
+    <Data Name="SourcePort">52978</Data>
+    <Data Name="SourcePortName">-</Data>
+    <Data Name="DestinationIsIpv6">false</Data>
+    <Data Name="DestinationIp">1.1.1.1</Data>
+    <Data Name="DestinationHostname">-</Data>
+    <Data Name="DestinationPort">443</Data>
+    <Data Name="DestinationPortName">https</Data>
+  </EventData>
+</Event>

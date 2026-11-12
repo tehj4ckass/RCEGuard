@@ -17,12 +17,14 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install and all simulator scenarios verified with Sysmon 15.22, `uninstall.ps1` not yet run |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log, toast | open |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console, **live run against Sysmon not yet verified**; not yet installed as a Windows service; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
-| M4 | Tray UI, ntfy, heartbeat | open |
+| M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
 
-Right now RCEGuard only **records** events. Nothing is evaluated, blocked or reported yet.
+Right now the guard has to be started by hand in an administrator console. It evaluates events,
+terminates the client on critical findings and writes every finding to a database. It does not
+notify anyone yet, and nothing is blocked in advance.
 
 ## Requirements
 
@@ -81,6 +83,81 @@ Save the recorded events as XML, for example as raw material for test fixtures:
 .\scripts\show-events.ps1 -Last 200 -OutFile out\events.xml
 ```
 
+## Running the guard
+
+`RCEGuard.Service` reads the Sysmon log, applies the rules and acts on the findings. Until it is
+installed as a Windows service (next step of M2), start it in an administrator PowerShell:
+
+```powershell
+.\src\RCEGuard.Service\bin\Release\net8.0-windows\RCEGuard.Service.exe
+```
+
+| Option | Effect |
+| :--- | :--- |
+| `--dry-run` | report findings, terminate nothing |
+| `--config <file>` | configuration file, default `C:\ProgramData\RCEGuard\appsettings.json` |
+| `--data-dir <folder>` | data folder, default `C:\ProgramData\RCEGuard` |
+| `--replay <file>` | evaluate a saved events file instead of the live log, then exit; never terminates anything, needs no admin rights |
+
+Without `appsettings.json` the client the sensor was installed for is the only profile, with an
+empty allowlist: every connection of the client is then an R2 alert. A configuration looks like
+this (`killOnUnknownRemote` and `killEnabled` are optional):
+
+```json
+{
+  "killEnabled": true,
+  "profiles": [
+    {
+      "name": "Warmane",
+      "clientPath": "D:\\Games\\Warmane\\Wow.exe",
+      "allowedRemote": ["203.0.113.0/24"],
+      "allowedHostnames": ["logon.example.org"],
+      "killOnUnknownRemote": false
+    }
+  ]
+}
+```
+
+What the rules do:
+
+| Rule | Trigger | Severity | Action |
+| :--- | :--- | :--- | :--- |
+| R1 | the client starts any program | critical | terminate child and client |
+| R2 | connection to an address that is not allowed (loopback is always allowed) | critical | alert; terminate only with `killOnUnknownRemote` |
+| R3 | program file created anywhere, or any file in a Startup folder | high | alert |
+| R3 | other file outside the game folder | medium | log |
+| R4 | autostart, Winlogon, debugger hijack or service configuration written | critical | terminate client |
+| R4 | such an entry removed / other write below `Services` | medium / info | log |
+| R5 | unsigned module loaded from a user-writable folder outside the game folder | high | alert |
+| R5 | unsigned module loaded from elsewhere outside the game folder | medium | log |
+| R6 | the client starts a thread in another program | critical | terminate client |
+| R7 | the client opens another program (not its own child) | medium | log |
+| R9 | miner-like command line in a child of the client | critical | terminate child and client |
+| R9 | miner-like command line in an unrelated process | critical | alert only: a string match is no reason to kill a process that is not tied to the client |
+
+A process is only terminated if its pid still runs the program the event named. Findings go to
+`findings.db` (SQLite) in the data folder. "Alert" currently means a line in the console; the
+notification itself comes with the tray app in M4, because a service cannot show toasts.
+
+The guard stops with an error instead of idling if it cannot read the Sysmon log.
+
+### Acceptance test
+
+Runs all simulator scenarios against the running guard and checks that each one is detected
+within 2 s and that the critical ones are terminated. In an administrator PowerShell, after
+`.\build.ps1` and publishing the simulator:
+
+```powershell
+.\scripts\acceptance-test.ps1 -DownloadSysmon -AcceptSysmonEula
+```
+
+It installs the sensor for the test client if needed and writes `out\m2-result.txt` and
+`out\m2-service.log`. The simulator switch `--hold [seconds]` used by the test keeps the client
+(and for `--spawn` its child) alive, so the guard has something to terminate; a client that
+survives exits with code 3.
+
+## Monitoring the real client
+
 To monitor the real client instead, run `install.ps1` again with its path, for example
 `-ClientPath 'D:\Games\Warmane\Wow.exe'`.
 
@@ -131,7 +208,11 @@ sysmon/rceguard-sysmon.template.xml    Sysmon configuration template
 scripts/render-config.ps1              renders the template for one client (no admin)
 scripts/install.ps1                    installs Sysmon / loads the configuration (admin)
 scripts/uninstall.ps1                  removes the sensor again (admin)
-scripts/show-events.ps1                prints recorded events (admin)
+scripts/show-events.ps1                prints or saves recorded events (admin)
+scripts/acceptance-test.ps1            simulator scenarios against the running guard (admin)
+src/RCEGuard.Core/                     rule engine, event parser, configuration (no OS dependencies)
+src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
+tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
 build.ps1                              build wrapper that insists on a real .NET SDK
 ```

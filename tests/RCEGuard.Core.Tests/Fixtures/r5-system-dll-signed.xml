@@ -1,0 +1,36 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>7</EventID>
+    <Version>3</Version>
+    <Level>4</Level>
+    <Task>7</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-12T14:04:58.3267769Z" />
+    <EventRecordID>5</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="36052" ThreadID="21708" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">R5</Data>
+    <Data Name="UtcTime">2026-11-12 14:04:58.292</Data>
+    <Data Name="ProcessGuid">{11111111-c78a-6af5-4888-030000006801}</Data>
+    <Data Name="ProcessId">25544</Data>
+    <Data Name="Image">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="ImageLoaded">C:\Windows\System32\ntdll.dll</Data>
+    <Data Name="FileVersion">10.0.26100.9818 (WinBuild.160101.0800)</Data>
+    <Data Name="Description">NT Layer DLL</Data>
+    <Data Name="Product">Microsoft® Windows® Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">ntdll.dll</Data>
+    <Data Name="Hashes">SHA256=B072EFAEAC06C558B1AB71D7E91F2D7C14903262AF53E33BD277EDC4CE5AED21</Data>
+    <Data Name="Signed">true</Data>
+    <Data Name="Signature">Microsoft Windows</Data>
+    <Data Name="SignatureStatus">Valid</Data>
+    <Data Name="User">TESTPC\player</Data>
+  </EventData>
+</Event>
