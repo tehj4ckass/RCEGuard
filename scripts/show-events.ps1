@@ -15,19 +15,49 @@
     Keeps running and prints new events as they arrive (Ctrl+C to stop).
 
 .PARAMETER Raw
-    Prints the full event XML instead of one line (e.g. to save test fixtures).
+    Prints the full event XML instead of one line.
+
+.PARAMETER OutFile
+    Saves the last events as one XML file (root element Events, UTF-8, oldest first) instead
+    of printing them, e.g. as test fixtures. The folder is created if it is missing.
+
+.EXAMPLE
+    .\show-events.ps1 -Last 200 -OutFile out\events.xml
 #>
 [CmdletBinding()]
 param(
     [int] $Last = 30,
     [switch] $Follow,
-    [switch] $Raw
+    [switch] $Raw,
+    [string] $OutFile
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $logName = 'Microsoft-Windows-Sysmon/Operational'
+
+if ($OutFile) {
+    if ($Follow) { throw '-OutFile cannot be combined with -Follow.' }
+
+    $saved = @(Get-WinEvent -LogName $logName -MaxEvents $Last -ErrorAction SilentlyContinue)
+    [array]::Reverse($saved)
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('<?xml version="1.0" encoding="utf-8"?>')
+    $lines.Add('<Events>')
+    foreach ($entry in $saved) { $lines.Add($entry.ToXml()) }
+    $lines.Add('</Events>')
+
+    # Resolve against the current PowerShell location, not the process working directory.
+    $target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
+    $targetDir = [IO.Path]::GetDirectoryName($target)
+    if (-not (Test-Path -LiteralPath $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    [IO.File]::WriteAllLines($target, $lines, [Text.UTF8Encoding]::new($false))
+    Write-Host "$($saved.Count) events saved to '$target'."
+    return
+}
 
 # Fields worth showing per event id; everything else is in -Raw.
 $fieldsById = @{
