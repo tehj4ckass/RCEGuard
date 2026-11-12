@@ -1,6 +1,7 @@
 using System.Diagnostics.Eventing.Reader;
 using System.Net;
 using System.Threading.Channels;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Rules;
 using RCEGuard.Core.Sysmon;
@@ -49,6 +50,13 @@ public sealed class GuardWorker : BackgroundService
             }
 
             logger.LogCritical("RCEGuard cannot run: {Reason}", Explain(ex));
+            if (WindowsServiceHelpers.IsWindowsService())
+            {
+                // Ending the process without reporting "stopped" is what Windows counts as a failure:
+                // only then do the recovery actions of the service (restart) apply.
+                Environment.Exit(1);
+            }
+
             Environment.ExitCode = 1;
             lifetime.StopApplication();
         }

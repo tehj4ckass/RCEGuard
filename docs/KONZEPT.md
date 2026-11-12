@@ -232,5 +232,20 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   verhindern kann den Start aber nur M3 (`DisallowChildProcessCreation`). Ob ein eigener ETW-Abnehmer schneller wäre, ist
   offen.
 - **Regelidee „Client läuft als Administrator“** (Abschnitt 13) ist nicht umgesetzt und wartet auf eine Entscheidung.
-- **Offen in M2:** Registrierung als Windows-Dienst (`LocalSystem`) in `install.ps1`/`uninstall.ps1`, Verfolgung von
-  Enkelprozessen, Entprellen wiederholter Alarme.
+- **Windows-Dienst (gebaut 12.11.2026, am echten System noch nicht bestätigt).**
+  - *Ort:* `install.ps1` kopiert den veröffentlichten Dienst nach `C:\Program Files\RCEGuard`. Ein Dienst mit
+    `LocalSystem` darf nie aus einem Ordner starten, den ein normaler Benutzer ändern kann (Repo, `artifacts\`), sonst
+    wäre er selbst der Weg zu Systemrechten. Der Dienstpfad steht in Anführungszeichen.
+  - *Laufzeit:* self-contained veröffentlicht (`build.ps1 -Publish`, rund 75 MB). Das SDK liegt hier im Benutzerprofil;
+    darauf darf ein Systemdienst nicht angewiesen sein. Preis: Die mitgelieferte .NET-Laufzeit bekommt keine Updates
+    über Windows Update, sondern nur mit einer neuen Veröffentlichung.
+  - *Start und Ausfall:* automatischer Start, abhängig vom Sysmon-Dienst. Endet der Prozess unerwartet, startet Windows
+    ihn neu (5 s, 5 s, danach alle 60 s). Kann der Dienst nicht arbeiten (Sysmon-Log fehlt, Konfiguration ungültig),
+    beendet er den Prozess mit Fehler, statt sich sauber abzumelden; nur so greifen die Neustart-Regeln. Wird Sysmon
+    gestoppt, stoppt Windows auch RCEGuard: Der Schutz ist dann sichtbar aus, statt still nichts zu sehen.
+  - *Log:* `C:\ProgramData\RCEGuard\guard.log` (5 MB, eine Vorgängerdatei), weil ein Dienst keine Konsole hat. Der
+    Ordner ist für Benutzer lesbar, aber nicht schreibbar; darauf baut später die Tray-App auf.
+  - *Scheitert der Start bei der Installation*, wird der Dienst wieder entfernt, damit Windows ihn nicht endlos neu
+    startet; der Sensor bleibt.
+  - *Abnahme:* `acceptance-test.ps1 -InstalledService` prüft Szenarien, Registrierung und den Neustart nach Abbruch.
+- **Offen in M2:** Verfolgung von Enkelprozessen, Entprellen wiederholter Alarme.

@@ -1,13 +1,19 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Installs the RCEGuard sensor: Sysmon with a configuration that only watches one game client.
+    Installs RCEGuard: the Sysmon sensor for one game client and the guard service that reacts to it.
 
 .DESCRIPTION
-    Milestone M1 (sensor only). The script
-      1. renders the Sysmon configuration for the given client,
-      2. installs Sysmon with it, or loads it into a Sysmon that RCEGuard installed earlier,
-      3. creates C:\ProgramData\RCEGuard, writable by administrators only.
+    The script
+      1. creates C:\ProgramData\RCEGuard, writable by administrators only,
+      2. renders the Sysmon configuration for the given client,
+      3. installs Sysmon with it, or loads it into a Sysmon that RCEGuard installed earlier,
+      4. copies the published guard service to C:\Program Files\RCEGuard and registers it as the
+         Windows service 'RCEGuard': LocalSystem, automatic start, depends on Sysmon, restarted by
+         Windows after a failure. Publish the service first with '.\build.ps1 -Publish'.
+
+    Running the script again points the sensor at another client and updates the service.
+    -SkipService installs only the sensor.
 
     Sysmon has one configuration per machine. If a Sysmon that RCEGuard did not install is
     already present, the script stops, because loading this configuration would replace the
@@ -25,6 +31,12 @@
     (https://learn.microsoft.com/sysinternals/license-terms); confirm that with
     -AcceptSysmonEula.
 
+.PARAMETER ServicePath
+    Folder with the published service; default is artifacts\service of this repository.
+
+.PARAMETER SkipService
+    Installs only the sensor. A guard service that is already installed is kept and restarted.
+
 .EXAMPLE
     .\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -DownloadSysmon -AcceptSysmonEula
 
@@ -38,7 +50,9 @@ param(
     [string] $SysmonPath,
     [switch] $DownloadSysmon,
     [switch] $AcceptSysmonEula,
-    [switch] $ReplaceExistingConfig
+    [switch] $ReplaceExistingConfig,
+    [string] $ServicePath,
+    [switch] $SkipService
 )
 
 Set-StrictMode -Version Latest
@@ -50,6 +64,17 @@ $statePath = Join-Path $dataDir 'install-state.json'
 $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
+. (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+
+# Check this before anything on the machine is changed.
+if (-not $SkipService) {
+    # Not a param default: under 'powershell.exe -File' $PSScriptRoot is still empty in the param block.
+    if (-not $ServicePath) { $ServicePath = Join-Path $PSScriptRoot '..\artifacts\service' }
+    $ServicePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ServicePath)
+    if (-not (Test-Path -LiteralPath (Join-Path $ServicePath $script:GuardExeName) -PathType Leaf)) {
+        throw "No published service in '$ServicePath'. Publish it first with '.\build.ps1 -Publish' (no admin rights needed), or pass -SkipService to install only the sensor."
+    }
+}
 
 function Assert-MicrosoftSigned([string] $path) {
     $signature = Get-AuthenticodeSignature -LiteralPath $path
@@ -149,16 +174,40 @@ else {
     Write-Host "Sysmon installed (service '$($installed.ServiceName)')."
 }
 
-# --- 4. Remember what was done, for uninstall.ps1 ----------------------------------------------
-[ordered]@{
-    clientPath                = [IO.Path]::GetFullPath($ClientPath)
-    sysmonServiceName         = $installed.ServiceName
-    sysmonExe                 = $installed.Exe
-    sysmonInstalledByRceGuard = [bool] $sysmonInstalledByRceGuard
-    replacedForeignConfig     = [bool] ($replacedForeignConfig -or ($null -ne $state -and $state.replacedForeignConfig))
-    updatedUtc                = (Get-Date).ToUniversalTime().ToString('o')
-} | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+# --- 4. Remember what was done, for uninstall.ps1 and for the service --------------------------
+# The service reads the client path from this file when it starts, so it is written first.
+$replaced = [bool] ($replacedForeignConfig -or ($null -ne $state -and $state.replacedForeignConfig))
+function Write-InstallState([bool] $serviceInstalled) {
+    [ordered]@{
+        clientPath                = [IO.Path]::GetFullPath($ClientPath)
+        sysmonServiceName         = $installed.ServiceName
+        sysmonExe                 = $installed.Exe
+        sysmonInstalledByRceGuard = [bool] $sysmonInstalledByRceGuard
+        replacedForeignConfig     = $replaced
+        serviceInstalled          = $serviceInstalled
+        updatedUtc                = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+}
+
+$existingService = Get-GuardService
+$serviceIsOurs = $null -ne $existingService -and (Test-GuardServiceIsOurs $existingService)
+Write-InstallState $serviceIsOurs
 
 Write-Host ''
 Write-Host "RCEGuard sensor is active for '$([IO.Path]::GetFullPath($ClientPath))'."
-Write-Host "Watch the events with: .\show-events.ps1 -Follow"
+
+# --- 5. The guard service ----------------------------------------------------------------------
+if (-not $SkipService) {
+    Install-GuardService $ServicePath $installed.ServiceName $dataDir
+    Write-InstallState $true
+    Write-Host "RCEGuard service is running (Windows service '$script:GuardServiceName', LocalSystem, starts with Windows)."
+    Write-Host "Its log: $(Join-Path $dataDir $script:GuardLogName)"
+}
+elseif ($serviceIsOurs) {
+    # The service only reads the client path when it starts.
+    Restart-GuardService $dataDir
+    Write-Host 'RCEGuard service restarted with the new settings.'
+}
+else {
+    Write-Host 'The guard service was not installed (-SkipService). Watch the events with: .\show-events.ps1 -Follow'
+}

@@ -9,10 +9,16 @@
 
 .PARAMETER Configuration
     Build configuration, Release by default.
+
+.PARAMETER Publish
+    Also publishes the service to artifacts\service, the folder scripts\install.ps1 installs from.
+    The publish is self-contained (brings its own .NET runtime): the service runs as LocalSystem
+    and must not depend on a runtime in a user profile.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release'
+    [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release',
+    [switch] $Publish
 )
 
 Set-StrictMode -Version Latest
@@ -36,4 +42,13 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed (exit code $LASTEXITCODE)." }
 if (Test-Path (Join-Path $PSScriptRoot 'tests')) {
     & dotnet test $solution -c $Configuration --no-build --nologo
     if ($LASTEXITCODE -ne 0) { throw "Tests failed (exit code $LASTEXITCODE)." }
+}
+
+if ($Publish) {
+    $serviceOut = Join-Path $PSScriptRoot 'artifacts\service'
+    if (Test-Path -LiteralPath $serviceOut) { Remove-Item -LiteralPath $serviceOut -Recurse -Force }
+    $serviceProject = Join-Path $PSScriptRoot 'src\RCEGuard.Service\RCEGuard.Service.csproj'
+    & dotnet publish $serviceProject -c $Configuration -r win-x64 --self-contained true -o $serviceOut --nologo
+    if ($LASTEXITCODE -ne 0) { throw "Publishing the service failed (exit code $LASTEXITCODE)." }
+    Write-Host "Service published to '$serviceOut'."
 }

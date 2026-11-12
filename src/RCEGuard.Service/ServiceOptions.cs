@@ -21,6 +21,9 @@ public sealed record ServiceOptions
     /// </summary>
     public string? ReplayPath { get; init; }
 
+    /// <summary>Name of the log file in the data folder.</summary>
+    public const string LogFileName = "guard.log";
+
     /// <summary>Usage text for --help.</summary>
     public const string Usage =
         """
@@ -33,6 +36,8 @@ public sealed record ServiceOptions
           --replay <file>      evaluate a saved events file instead of the live log, then exit;
                                never terminates anything and needs no admin rights
           --help               show this text
+
+        The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
         """;
 
     /// <summary>Parses the arguments; returns null and an error text if they are not understood.</summary>

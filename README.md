@@ -17,14 +17,14 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. **Not yet installed as a Windows service**; grandchildren of the client are not tracked yet; toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installation as a Windows service (LocalSystem) is built, **but not yet verified on a real machine**. Grandchildren of the client are not tracked yet; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
 
-Right now the guard has to be started by hand in an administrator console. It evaluates events,
-terminates the client on critical findings and writes every finding to a database. It does not
-notify anyone yet, and nothing is blocked in advance.
+Right now the guard evaluates events, terminates the client on critical findings and writes every
+finding to a database and a log file. It can be installed as a Windows service. It does not notify
+anyone yet, and nothing is blocked in advance.
 
 ## Requirements
 
@@ -34,6 +34,7 @@ notify anyone yet, and nothing is blocked in advance.
   Microsoft (the configuration uses schema 4.90). It is not part of this repository;
   `install.ps1` can download it from Microsoft for you.
 - Admin rights for installing, uninstalling and reading the Sysmon log
+- About 75 MB in `C:\Program Files\RCEGuard` for the service with its own .NET runtime
 
 ## Trying the sensor with the simulator
 
@@ -47,10 +48,10 @@ Build it and copy it to a test folder:
 dotnet publish src\RCEGuard.FakeWow -c Release -o C:\RCEGuardTest
 ```
 
-Install the sensor for that test client, in a PowerShell **started as administrator**:
+Install only the sensor for that test client, in a PowerShell **started as administrator**:
 
 ```powershell
-.\scripts\install.ps1 -ClientPath C:\RCEGuardTest\Wow.exe -DownloadSysmon -AcceptSysmonEula
+.\scripts\install.ps1 -ClientPath C:\RCEGuardTest\Wow.exe -SkipService -DownloadSysmon -AcceptSysmonEula
 ```
 
 Watch the events in the admin window:
@@ -85,8 +86,40 @@ Save the recorded events as XML, for example as raw material for test fixtures:
 
 ## Running the guard
 
-`RCEGuard.Service` reads the Sysmon log, applies the rules and acts on the findings. Until it is
-installed as a Windows service (next step of M2), start it in an administrator PowerShell:
+`RCEGuard.Service` reads the Sysmon log, applies the rules and acts on the findings.
+
+### As a Windows service
+
+Publish the service (no admin rights needed), then install sensor and service in a PowerShell
+**started as administrator**:
+
+```powershell
+.\build.ps1 -Publish
+```
+
+```powershell
+.\scripts\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -DownloadSysmon -AcceptSysmonEula
+```
+
+`install.ps1` copies the published service to `C:\Program Files\RCEGuard` and registers it as the
+Windows service `RCEGuard`:
+
+- it runs as `LocalSystem` and starts with Windows, after Sysmon (it depends on the Sysmon service);
+- Windows restarts it if its process ends unexpectedly (after 5 s, from the third failure on after 60 s);
+- it only ever starts from Program Files, where a normal user cannot change its files;
+- it writes its log to `C:\ProgramData\RCEGuard\guard.log` and its findings to `findings.db` in
+  the same folder. Normal users can read that folder but not write to it.
+
+The published service brings its own .NET runtime (about 75 MB), so it does not depend on a
+runtime installed in a user profile. Running `install.ps1` again updates the service and points it
+at another client; `-SkipService` installs only the sensor.
+
+Stopping the Sysmon service also stops RCEGuard, because the guard depends on it.
+
+### In a console
+
+For development, start the build output in an administrator PowerShell instead (not while the
+Windows service is running: two guards would both act on every event):
 
 ```powershell
 .\src\RCEGuard.Service\bin\Release\net8.0-windows\RCEGuard.Service.exe
@@ -161,8 +194,20 @@ within 2 s and that the critical ones are terminated. In an administrator PowerS
 .\scripts\acceptance-test.ps1 -DownloadSysmon -AcceptSysmonEula
 ```
 
-It installs the sensor for the test client if needed and writes `out\m2-result.txt`,
-`out\m2-service.log` and the recorded events as `out\m2-events.xml`. The simulator switch `--hold [seconds]` used by the test keeps the client
+It installs the sensor for the test client if needed, starts a console instance of the guard for
+the duration of the test and writes `out\m2-result.txt`, `out\m2-service.log` and the recorded
+events as `out\m2-events.xml`.
+
+To test the installed Windows service instead (after `.\build.ps1 -Publish`):
+
+```powershell
+.\scripts\acceptance-test.ps1 -InstalledService
+```
+
+This installs sensor and service for the test client, runs the same scenarios against the service,
+checks how the service is registered (folder, account, start type, dependency) and ends the
+service process once to see whether Windows restarts it. The service stays installed for the test
+client afterwards. The simulator switch `--hold [seconds]` used by the test keeps the client
 (and for `--spawn` its child) alive, so the guard has something to terminate; a client that
 survives exits with code 3.
 
@@ -230,13 +275,14 @@ scripts/render-config.ps1              renders the template for one client (no a
 scripts/install.ps1                    installs Sysmon / loads the configuration (admin)
 scripts/uninstall.ps1                  removes the sensor again (admin)
 scripts/SysmonTools.ps1                shared Sysmon helpers of the two scripts above
+scripts/GuardServiceTools.ps1          shared helpers for the RCEGuard Windows service
 scripts/show-events.ps1                prints or saves recorded events (admin)
 scripts/acceptance-test.ps1            simulator scenarios against the running guard (admin)
 src/RCEGuard.Core/                     rule engine, event parser, configuration (no OS dependencies)
 src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
 tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
-build.ps1                              build wrapper that insists on a real .NET SDK
+build.ps1                              build wrapper that insists on a real .NET SDK; -Publish for the service
 ```
 
 ## License

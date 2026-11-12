@@ -1,10 +1,11 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Removes the RCEGuard sensor again.
+    Removes RCEGuard again: the guard service and the sensor.
 
 .DESCRIPTION
-    Uses C:\ProgramData\RCEGuard\install-state.json written by install.ps1:
+    First stops and removes the Windows service 'RCEGuard' and C:\Program Files\RCEGuard.
+    Then uses C:\ProgramData\RCEGuard\install-state.json written by install.ps1:
       - Sysmon is uninstalled only if RCEGuard installed it.
       - If RCEGuard replaced the rules of a Sysmon that was already there, Sysmon stays
         installed and is reset to its default rules; the earlier rules were dumped to
@@ -12,7 +13,7 @@
     The data folder is removed unless -KeepData is given or such a dump exists.
 
 .PARAMETER KeepData
-    Keeps C:\ProgramData\RCEGuard (configuration, state, dumps).
+    Keeps C:\ProgramData\RCEGuard (configuration, findings database, log, dumps).
 #>
 [CmdletBinding()]
 param(
@@ -25,16 +26,29 @@ $ErrorActionPreference = 'Stop'
 $dataDir = Join-Path $env:ProgramData 'RCEGuard'
 $statePath = Join-Path $dataDir 'install-state.json'
 
+. (Join-Path $PSScriptRoot 'SysmonTools.ps1')
+. (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+
+# The guard service goes first: it depends on Sysmon and keeps files in the data folder open.
+# It is removed even without a state file, so a broken installation can always be cleaned up.
+$serviceRemoved = Uninstall-GuardService
+if ($serviceRemoved) {
+    Write-Host "RCEGuard service removed (Windows service '$script:GuardServiceName', '$script:GuardInstallDir')."
+}
+
 if (-not (Test-Path -LiteralPath $statePath)) {
-    Write-Host "No RCEGuard installation found ('$statePath' is missing). Nothing to do."
+    if ($serviceRemoved) {
+        Write-Host "No sensor installation found ('$statePath' is missing); nothing else to do."
+    }
+    else {
+        Write-Host "No RCEGuard installation found ('$statePath' is missing). Nothing to do."
+    }
     return
 }
 
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 $sysmonExe = $state.sysmonExe
 $sysmonPresent = $sysmonExe -and (Test-Path -LiteralPath $sysmonExe -PathType Leaf)
-
-. (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 
 if (-not $sysmonPresent) {
     Write-Warning "Sysmon binary '$sysmonExe' not found; it seems to have been removed already."

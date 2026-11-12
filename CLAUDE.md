@@ -23,13 +23,20 @@ Tabelle „Status“ der [`README.md`](README.md) und wird mit jedem Meilenstein
 
 Immer `.\build.ps1`, nie blankes `dotnet build`: Liegt nur eine Runtime im `PATH`, meldet `dotnet build`
 „No .NET SDKs were found“ und endet trotzdem mit Exit-Code 0. `TreatWarningsAsErrors` und `Nullable` gelten
-lösungsweit.
+lösungsweit. `.\build.ps1 -Publish` legt zusätzlich den Dienst nach `artifacts\service` (self-contained); von dort
+installiert ihn `install.ps1`.
 
 ## Admin-Rechte
 
-`install.ps1`, `uninstall.ps1` und `show-events.ps1` brauchen Admin-Rechte und ändern Systemzustand. Agenten
-führen sie nicht selbst aus, sondern liefern die Befehle und werten die Rückmeldung des Inhabers aus.
-`render-config.ps1` und der Simulator laufen ohne Admin-Rechte.
+`install.ps1`, `uninstall.ps1`, `show-events.ps1` und `acceptance-test.ps1` brauchen Admin-Rechte und ändern
+Systemzustand. Agenten führen sie nicht selbst aus, sondern liefern die Befehle und werten die Rückmeldung des
+Inhabers aus. `render-config.ps1`, `build.ps1` und der Simulator laufen ohne Admin-Rechte.
+
+Der Dienst läuft als `LocalSystem` und startet nur aus `C:\Program Files\RCEGuard`, nie aus einem Ordner, den ein
+normaler Benutzer ändern kann (also nie direkt aus dem Repo oder aus `artifacts\`).
+
+In Skripten keine `$PSScriptRoot`-Ausdrücke als Parameter-Standardwerte: Unter `powershell.exe -File`
+(Windows PowerShell 5.1) ist die Variable im `param`-Block noch leer.
 
 ## Sprache
 

@@ -25,6 +25,12 @@ builder.Logging.AddSimpleConsole(console =>
     console.ColorBehavior = LoggerColorBehavior.Default; // colours in a console, plain text when redirected
 });
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+if (options.ReplayPath is null)
+{
+    // The live guard also logs to a file: as a Windows service it has no console.
+    builder.Logging.AddProvider(new FileLogProvider(Path.Combine(options.DataDirectory, ServiceOptions.LogFileName)));
+}
+
 builder.Services.AddSingleton(options);
 builder.Services.AddHostedService<GuardWorker>();
 
