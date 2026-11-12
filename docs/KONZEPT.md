@@ -282,18 +282,25 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   (genau eine R2-Meldung); es lief bisher nur gegen den Ersatz-Dienst (PowerShell 7 und 5.1, dazu eine Fehlvariante mit
   drei Meldungen, die durchfällt), noch nicht als Administrator.
 - **R2: Verbindungen kommen spät und manchmal gar nicht (12.11.2026).** Zwei Beobachtungen aus dieser Prüfung:
-  - *Verzögerung im Sensor.* Sysmon schreibt eine Verbindung 1,6 bis 2,0 s nach dem Verbindungsaufbau ins Log (fünf
-    aufgezeichnete Ereignisse, `UtcTime` gegen `TimeCreated`). Der Befund entsteht also rund 2,5 bis 3 s nach der
-    Verbindung. Die Angabe „ms after the event“ im Log rechnet ab dem Log-Eintrag und zeigt das nicht; das
+  - *Verzögerung im Sensor.* Sysmon schreibt eine Verbindung 1,3 bis 2,9 s nach dem Verbindungsaufbau ins Log (38
+    aufgezeichnete Ereignisse, im Mittel 2,0 s; `UtcTime` gegen `TimeCreated`), in Schüben im Sekundentakt. Der Befund
+    entsteht also rund 2 bis 4 s nach der Verbindung. Die Angabe „ms after the event“ im Log rechnet ab dem Log-Eintrag und zeigt das nicht; das
     Abnahmekriterium (2 s) gilt bei R2 deshalb nur für die Strecke ab dem Log-Eintrag.
   - *Fehlende Meldungen.* Eine einzelne Verbindung wurde nicht gemeldet, wenn der Client kurz danach endete: sofort
     oder nach 1 s in 6 von 6 Versuchen, nach 3 s in 2 von 6, nach 8 s nie (4 von 4 gemeldet). Bei mehreren Verbindungen
     ohne Wartezeit fehlte jeweils genau eine (3 → 2, 6 → 5). Im M1-Mitschnitt wurde eine solche Verbindung dagegen
-    aufgezeichnet. Die Regel im Dienst hängt nicht davon ab, ob der Prozess noch läuft; die Vermutung ist deshalb, dass
-    Sysmon das Ereignis nicht schreibt, wenn es den Prozess beim späten Auswerten nicht mehr zuordnen kann. Bestätigt ist
-    das nicht: Dazu fehlt der Blick ins Sysmon-Log (`show-events.ps1 -Id 3`, nur als Administrator).
+    aufgezeichnet, ebenso eine im zweiten Abnahmelauf, obwohl der Client dort rund eine Sekunde nach dem Start beendet
+    wurde.
+  - *Ursache liegt im Sensor (bestätigt mit `show-events.ps1 -Last 80 -Id 3`).* Im Sysmon-Log stehen für die
+    betroffenen Prozesse keine Verbindungsereignisse. Der Dienst hat alle 25 Ereignisse gemeldet oder gezählt, die Sysmon
+    seit seinem Start geschrieben hat (Abgleich je PID gegen `findings.db`). Warum Sysmon sie nicht schreibt, ist nicht
+    belegt. Bekannt ist, dass Sysmon bei Ereignis 3 als Programm `<unknown process>` einträgt, wenn es den Prozess nicht
+    mehr zuordnen kann; ein solches Ereignis passt nicht auf die Regel `Image is <Client>` und würde verworfen. Dazu
+    passt nicht alles (zwei Aussetzer bei 3 s Restlaufzeit, zwei Treffer trotz beendetem Client).
+  - *Nicht gebaut:* eine zweite Regel, die auch Verbindungen von `<unknown process>` aufzeichnet. Sie würde die
+    Vermutung prüfen, schriebe aber Verbindungen fremder Programme ins Log, die der Dienst keinem Client zuordnen kann.
+    Entscheidung des Inhabers.
   - *Folge.* Der echte Client läuft lange, seine eigenen Verbindungen sind davon nicht betroffen; eine kurze Verbindung
     unmittelbar vor dem Ende des Clients kann fehlen. R2 mit `killOnUnknownRemote` käme in jedem Fall erst nach rund 3 s.
     Verhindern können unbekannte Verbindungen nur die Firewall-Regeln aus M3.
-- **Offen in M2:** Ursache der fehlenden R2-Meldungen klären; Szenario `repeat` als Administrator laufen lassen;
-  Lesezeichen im Sysmon-Log (siehe oben).
+- **Offen in M2:** Szenario `repeat` als Administrator laufen lassen; Lesezeichen im Sysmon-Log (siehe oben).
