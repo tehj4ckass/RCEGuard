@@ -232,7 +232,12 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   verhindern kann den Start aber nur M3 (`DisallowChildProcessCreation`). Ob ein eigener ETW-Abnehmer schneller wäre, ist
   offen.
 - **Regelidee „Client läuft als Administrator“** (Abschnitt 13) ist nicht umgesetzt und wartet auf eine Entscheidung.
-- **Windows-Dienst (gebaut 12.11.2026, am echten System noch nicht bestätigt).**
+- **Windows-Dienst (12.11.2026).** Abnahme mit `acceptance-test.ps1 -InstalledService` bestanden: alle fünf Szenarien
+  wie im Konsolenlauf (0,68 bis 1,08 s), Dienst läuft aus `C:\Program Files\RCEGuard` als `LocalSystem`, Start
+  automatisch, abhängig von `Sysmon64`, und Windows hat ihn 5 s nach dem Beenden seines Prozesses neu gestartet. Noch
+  nicht bestätigt: Start nach einem Neustart des Rechners, Entfernen durch `uninstall.ps1`, das Aufräumen bei
+  gescheitertem Start. Bekannte Lücke: Während der Dienst nicht läuft (hier 5 s), werden Ereignisse nicht nachgeholt;
+  das Abo liest nur neue Einträge. Ein Lesezeichen im Sysmon-Log würde das schließen.
   - *Ort:* `install.ps1` kopiert den veröffentlichten Dienst nach `C:\Program Files\RCEGuard`. Ein Dienst mit
     `LocalSystem` darf nie aus einem Ordner starten, den ein normaler Benutzer ändern kann (Repo, `artifacts\`), sonst
     wäre er selbst der Weg zu Systemrechten. Der Dienstpfad steht in Anführungszeichen.

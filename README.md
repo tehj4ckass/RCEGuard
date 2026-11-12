@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installation as a Windows service (LocalSystem) is built, **but not yet verified on a real machine**. Grandchildren of the client are not tracked yet; toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks and the restart by Windows after the service process was ended. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. Grandchildren of the client are not tracked yet; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
