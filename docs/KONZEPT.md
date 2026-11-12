@@ -372,5 +372,10 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     Start nachholte (Ereignisse aus Trockenläufen, 1179 s alt), und nahm deren Alter als Reaktionszeit. Es
     überspringt jetzt Zeilen mit dem Zusatz „written while RCEGuard was not running“; geprüft an den echten Logzeilen
     dieses Laufs in PowerShell 7 und 5.1 (13 Zeilen, ein gezählter Befund: R1 mit 1052 ms).
-- **Offen in M2:** ein Abnahmelauf mit `-InstalledService`, in dem alle sieben Szenarien bestehen (korrigiertes
-  Skript); die Selbstprüfung hat im echten Dienst noch nie ausgelöst, weil das Abo seither liefert.
+  - *Abnahme bestanden (12.11.2026, 21:59, installierter Dienst, korrigiertes Skript):* alle sieben Szenarien mit
+    118 bis 1136 ms, alle sieben Dienstprüfungen. Start: ein Ereignis nachgeholt, kein Befund. Neustart nach 62 s
+    (vierter Abbruch des Tages), danach 39 Ereignisse nachgeholt, das während des Ausfalls gestartete Programm 61 s
+    nach dem Ereignis gefunden, Kind und Client beendet. `sysmon-position.json` stand danach auf dem letzten Record.
+- **Offen in M2:** Start nach einem Rechner-Neustart; Entfernen mit `uninstall.ps1`; Aufräumen, wenn der Dienst nicht
+  starten kann. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
