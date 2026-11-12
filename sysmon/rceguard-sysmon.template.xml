@@ -13,10 +13,13 @@
   - The sensor is deliberately broad for the client; RCEGuard.Service decides what is an
     alert. Rule names (R1, R3 ...) appear as RuleName in the event and map to docs/KONZEPT.md.
   - Every event type RCEGuard does not use is switched off with an empty include filter.
+  - Sysmon validates the file against the DTD of the declared schemaversion and rejects event
+    tags that are newer than it (FileDeleteDetected does not exist in 4.50). Schema 4.90
+    needs Sysmon 15.0 or newer. A changed template can be checked without admin rights:
+    "Sysmon64.exe -i <rendered file>" validates first and only then asks for elevation.
 -->
-<Sysmon schemaversion="4.50">
+<Sysmon schemaversion="4.90">
   <HashAlgorithms>SHA256</HashAlgorithms>
-  <CheckRevocation>False</CheckRevocation>
 
   <EventFiltering>
 
@@ -92,6 +95,9 @@
     <ClipboardChange onmatch="include" />
     <ProcessTampering onmatch="include" />
     <FileDeleteDetected onmatch="include" />
+    <FileBlockExecutable onmatch="include" />
+    <FileBlockShredding onmatch="include" />
+    <FileExecutableDetected onmatch="include" />
 
   </EventFiltering>
 </Sysmon>

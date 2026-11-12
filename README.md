@@ -28,8 +28,9 @@ Right now RCEGuard only **records** events. Nothing is evaluated, blocked or rep
 
 - Windows 10/11 x64
 - .NET 8 SDK (to build the simulator)
-- [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon) from Microsoft. It is not
-  part of this repository; `install.ps1` can download it from Microsoft for you.
+- [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon) 15.0 or newer from
+  Microsoft (the configuration uses schema 4.90). It is not part of this repository;
+  `install.ps1` can download it from Microsoft for you.
 - Admin rights for installing, uninstalling and reading the Sysmon log
 
 ## Trying the sensor with the simulator
