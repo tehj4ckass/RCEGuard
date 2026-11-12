@@ -236,8 +236,8 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   wie im Konsolenlauf (0,68 bis 1,08 s), Dienst läuft aus `C:\Program Files\RCEGuard` als `LocalSystem`, Start
   automatisch, abhängig von `Sysmon64`, und Windows hat ihn 5 s nach dem Beenden seines Prozesses neu gestartet. Noch
   nicht bestätigt: Start nach einem Neustart des Rechners, Entfernen durch `uninstall.ps1`, das Aufräumen bei
-  gescheitertem Start. Bekannte Lücke: Während der Dienst nicht läuft (hier 5 s), werden Ereignisse nicht nachgeholt;
-  das Abo liest nur neue Einträge. Ein Lesezeichen im Sysmon-Log würde das schließen.
+  gescheitertem Start. Die damals bekannte Lücke (Ereignisse aus der Zeit, in der der Dienst nicht läuft, wurden nicht
+  nachgeholt) schließt die gespeicherte Position im Sysmon-Log, siehe unten.
   - *Ort:* `install.ps1` kopiert den veröffentlichten Dienst nach `C:\Program Files\RCEGuard`. Ein Dienst mit
     `LocalSystem` darf nie aus einem Ordner starten, den ein normaler Benutzer ändern kann (Repo, `artifacts\`), sonst
     wäre er selbst der Weg zu Systemrechten. Der Dienstpfad steht in Anführungszeichen.
@@ -303,4 +303,32 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   - *Folge.* Der echte Client läuft lange, seine eigenen Verbindungen sind davon nicht betroffen; eine kurze Verbindung
     unmittelbar vor dem Ende des Clients kann fehlen. R2 mit `killOnUnknownRemote` käme in jedem Fall erst nach rund 3 s.
     Verhindern können unbekannte Verbindungen nur die Firewall-Regeln aus M3.
-- **Offen in M2:** Szenario `repeat` als Administrator laufen lassen; Lesezeichen im Sysmon-Log (siehe oben).
+- **Position im Sysmon-Log (12.11.2026): Ereignisse aus der Ausfallzeit werden nachgeholt.** Der Dienst merkt sich
+  Record-ID und Zeit des zuletzt verarbeiteten Ereignisses in `sysmon-position.json` im Datenordner (nach einem Befund
+  sofort, sonst höchstens einmal je Sekunde, dazu beim Beenden; Schreiben über eine Zwischendatei). Beim Start liest er
+  zuerst alles, was danach ins Log geschrieben wurde, und danach wie bisher die neuen Ereignisse.
+  - *Kein Windows-Lesezeichen (`EventBookmark`), sondern Record-ID plus Zeit.* Das Abo fragt `EventRecordID > N` ab und
+    liest vorhandene Einträge mit. Die Zeit erkennt ein ersetztes Log: Gibt es den Record mit der gespeicherten ID nicht
+    mehr oder trägt er eine andere Zeit (Sysmon neu installiert, Log geleert), wird das ganze Log gelesen. Sind
+    Ereignisse nach der Position schon überschrieben, meldet der Dienst, wie viele fehlen. Der allererste Start liest
+    nichts Altes und speichert die Position des neuesten Eintrags.
+  - *Nachgeholte Ereignisse lösen dieselben Aktionen aus*, im Log mit dem Zusatz „written while RCEGuard was not
+    running“. Weil sie alt sein können, gilt zusätzlich: Ein Prozess wird nur beendet, wenn er vor dem Ereignis
+    gestartet wurde (Startzeit über ein Handle mit eingeschränkten Rechten; gleiche PID und gleiches Programm in einem
+    jüngeren Prozess bleibt unberührt, etwa ein neu gestarteter Client). Die Suche nach zurückgelassenen Programmen
+    läuft nur, wenn das Ereignis höchstens 30 s alt ist: Sie setzt voraus, dass die PID des beendeten Kindes
+    inzwischen niemand anderem gehört hat, und das gilt nur für kurze Zeit. Die Startzeit-Prüfung gilt auch im
+    laufenden Betrieb und kostet dort nichts.
+  - *Folge der Entscheidung:* Lief derselbe Client während eines langen Ausfalls weiter und hat in dieser Zeit etwas
+    Kritisches getan, wird er beim Start des Dienstes beendet. Das ist gewollt: Die Regel galt auch, als niemand
+    hinsah.
+  - *Grenzen:* Der Zustand der Regeln (bekannte Kinder für R7, Zähler fürs Entprellen) lebt im Speicher und beginnt
+    nach einem Neustart leer. Wird der Dienst innerhalb der Sekunde zwischen zwei Speicherungen hart beendet, liest er
+    bis zu eine Sekunde an Ereignissen ohne Befund noch einmal. Kann die Datei nicht geschrieben werden, läuft der
+    Dienst weiter und warnt einmal.
+  - *Test:* Entscheidungslogik in `LogResumeTests`; Abo, Positionsdatei und die ganze Dienstschleife über Stoppen und
+    Starten in `tests/RCEGuard.Service.Tests` gegen das Application-Log dieses Rechners (nur lesend), weil das
+    Sysmon-Log Admin-Rechte braucht. Der Beender mit Startzeit-Prüfung und Altersgrenze gegen echte Prozesse. Das
+    Abnahmeskript startet während des Ausfalls des Dienstes ein Szenario und verlangt Befund und Beenden danach; dieser
+    Teil lief bisher nur mit einem Ersatz für den Dienst.
+- **Offen in M2:** Abnahme mit `-InstalledService` für die Position im Sysmon-Log und das Szenario `repeat`.

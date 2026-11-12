@@ -283,6 +283,13 @@ try {
             $offset = Get-FileLength $serviceLog
             Write-Host "Ending the service process ($oldPid) to see whether Windows restarts it ..."
             Stop-Process -Id $oldPid -Force
+
+            # While the service is down the client starts a program. The restarted service must find
+            # that in the Sysmon log and act on it, although it was not running when it happened.
+            $missedOut = Join-Path $OutDir 'm2-missed.out'
+            $missed = Start-Process -FilePath $client -ArgumentList @('--spawn', '--hold', '30') -RedirectStandardOutput $missedOut -PassThru -WindowStyle Hidden
+            $null = $missed.Handle
+
             $deadline = (Get-Date).AddSeconds(30)
             $restarted = $false
             do {
@@ -292,6 +299,28 @@ try {
             } while (-not $restarted -and (Get-Date) -lt $deadline)
             $newPid = if ($null -ne $now) { [int] $now.ProcessId } else { 0 }
             $checks += [pscustomobject]@{ Check = 'restarted after its process was ended'; Value = "pid $oldPid -> $newPid"; Result = $(if ($restarted) { 'PASS' } else { 'FAIL' }) }
+
+            $missedEnded = $missed.WaitForExit(45000)
+            if (-not $missedEnded) { & taskkill.exe /PID $missed.Id /T /F 2>&1 | Out-Null }
+            $missedOutput = Get-Content -LiteralPath $missedOut -Raw -ErrorAction SilentlyContinue
+            $missedOutcome =
+                if (-not $missedEnded) { 'did not end' }
+                elseif ($missedOutput -match 'NOT TERMINATED') { 'survived' }
+                elseif ($missed.ExitCode -ne 0) { 'terminated' }
+                else { 'ended by itself' }
+            $lateFindings = @()
+            $settle = (Get-Date).AddSeconds(4)
+            do {
+                Start-Sleep -Milliseconds 250
+                $lateFindings = @(Read-LogLines $offset | Where-Object { $_ -match '\bR1 CRITICAL \[' -and $_ -match 'written while RCEGuard was not running' })
+            } while ($lateFindings.Count -eq 0 -and (Get-Date) -lt $settle)
+            $lateFound = if ($lateFindings.Count -gt 0) { 'R1 found afterwards' } else { 'R1 not found' }
+            $checks += [pscustomobject]@{
+                Check  = 'acted on a program started while it was down'
+                Value  = "$lateFound, client $missedOutcome"
+                Result = $(if ($lateFindings.Count -gt 0 -and $missedOutcome -eq 'terminated') { 'PASS' } else { 'FAIL' })
+            }
+            Remove-Item -LiteralPath $missedOut -Force -ErrorAction SilentlyContinue
         }
     }
 

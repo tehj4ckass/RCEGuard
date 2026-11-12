@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. Counting repeated alerts was checked in the installed service by hand (three connections: one report, two counted); its acceptance scenario `repeat` has so far only run against a stand-in guard. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. Counting repeated alerts was checked in the installed service by hand (three connections: one report, two counted); its acceptance scenario `repeat` has so far only run against a stand-in guard. Reading what was written to the Sysmon log while the service was not running is built and tested against another Windows log, **but not yet run against Sysmon**. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -115,7 +115,9 @@ Windows service `RCEGuard`:
 - Windows restarts it if its process ends unexpectedly (after 5 s, from the third failure on after 60 s);
 - it only ever starts from Program Files, where a normal user cannot change its files;
 - it writes its log to `C:\ProgramData\RCEGuard\guard.log` and its findings to `findings.db` in
-  the same folder. Normal users can read that folder but not write to it.
+  the same folder. Normal users can read that folder but not write to it;
+- it notes the last event it handled in `sysmon-position.json` there and, when it starts again,
+  first reads what Sysmon recorded in the meantime (see "After a restart").
 
 The published service brings its own .NET runtime (about 75 MB), so it does not depend on a
 runtime installed in a user profile. Running `install.ps1` again updates the service and points it
@@ -190,6 +192,17 @@ child as their parent and were started after it, and terminates them with everyt
 them. Limits: a program that was started by such a left-behind program which has itself exited
 is not found, and neither is one whose parent was forged.
 
+**After a restart.** The guard saves its position in the Sysmon log (at once after a finding,
+otherwise once a second). When it starts again, after a crash, an update or a reboot, it first
+reads the events written while it was not running; their findings carry the note "written while
+RCEGuard was not running" in the log. Such an event can be old, so two extra checks apply before
+anything is terminated: the process must have been started before the event (a pid that runs the
+same program again in a newer process is left alone), and programs left behind by an exited
+child are only searched for if the event is at most 30 seconds old. The very first start reads
+nothing old. If the Sysmon log was cleared or replaced in the meantime, everything in it is
+read; if events were overwritten before the guard could read them, it says how many. The rule
+engine starts empty after a restart: what it knew about running children is gone.
+
 **Repeated alerts.** The same alert (same rule, client process and target) is reported once
 and then only counted for `repeatWindowSeconds`; the count is stored with the finding. Findings
 that terminate a process are never held back.
@@ -243,7 +256,9 @@ To test the installed Windows service instead (after `.\build.ps1 -Publish`):
 
 This installs sensor and service for the test client, runs the same scenarios against the service,
 checks how the service is registered (folder, account, start type, dependency) and ends the
-service process once to see whether Windows restarts it. The service stays installed for the test
+service process once to see whether Windows restarts it. While the service is down, the client
+starts a program; the restarted service must find that in the log and terminate the client. The
+service stays installed for the test
 client afterwards. The simulator switch `--hold [seconds]` used by the test keeps the client
 (and for `--spawn` its child) alive, so the guard has something to terminate; a client that
 survives exits with code 3.
@@ -320,7 +335,7 @@ src/RCEGuard.Core/                     rule engine, event parser, configuration 
 src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
 tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
-tests/RCEGuard.Service.Tests/          tests of the process killer against real, harmless processes
+tests/RCEGuard.Service.Tests/          process killer against real, harmless processes; resuming in a real Windows log (read only)
 build.ps1                              build wrapper that insists on a real .NET SDK; -Publish for the service
 ```
 

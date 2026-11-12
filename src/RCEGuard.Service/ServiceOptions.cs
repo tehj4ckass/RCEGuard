@@ -21,8 +21,17 @@ public sealed record ServiceOptions
     /// </summary>
     public string? ReplayPath { get; init; }
 
+    /// <summary>
+    /// The event log to read. Always the Sysmon log; only tests read another one, because the
+    /// Sysmon log needs administrator rights. Not a command line option.
+    /// </summary>
+    public string LogName { get; init; } = "Microsoft-Windows-Sysmon/Operational";
+
     /// <summary>Name of the log file in the data folder.</summary>
     public const string LogFileName = "guard.log";
+
+    /// <summary>Name of the file in the data folder that holds the position of the last handled event.</summary>
+    public const string PositionFileName = "sysmon-position.json";
 
     /// <summary>Usage text for --help.</summary>
     public const string Usage =
@@ -38,6 +47,8 @@ public sealed record ServiceOptions
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
+        It notes the last event it handled in <data-dir>\sysmon-position.json and, when started again,
+        first reads what was written to the Sysmon log in the meantime.
         """;
 
     /// <summary>Parses the arguments; returns null and an error text if they are not understood.</summary>

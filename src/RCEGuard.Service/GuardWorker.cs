@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.Net;
 using System.Threading.Channels;
@@ -10,18 +11,23 @@ namespace RCEGuard.Service;
 
 /// <summary>
 /// The guard loop: subscribes to the Sysmon log, evaluates every new event and acts on the findings.
-/// Events are handled one at a time in log order, because the rule engine keeps state.
+/// Events are handled one at a time in log order, because the rule engine keeps state. The position
+/// of the last handled event is saved, so that after a restart the events written in the meantime
+/// are read first.
 /// </summary>
 public sealed class GuardWorker : BackgroundService
 {
-    private const string SysmonLog = "Microsoft-Windows-Sysmon/Operational";
     private static readonly TimeSpan HostRefreshInterval = TimeSpan.FromMinutes(10);
+
+    /// <summary>The position is saved at once after a finding, otherwise at most this often.</summary>
+    private static readonly TimeSpan PositionSaveInterval = TimeSpan.FromSeconds(1);
 
     private readonly ServiceOptions options;
     private readonly ILogger<GuardWorker> logger;
     private readonly IHostApplicationLifetime lifetime;
-    private readonly Channel<string> events = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<LogEntry> events = Channel.CreateUnbounded<LogEntry>(new UnboundedChannelOptions { SingleReader = true });
     private FindingDebouncer debouncer = new(TimeSpan.Zero);
+    private bool positionSaveFailed;
 
     /// <summary>Creates the worker.</summary>
     public GuardWorker(ServiceOptions options, ILogger<GuardWorker> logger, IHostApplicationLifetime lifetime)
@@ -90,39 +96,158 @@ public sealed class GuardWorker : BackgroundService
         }
 
         // Fail closed: the watcher itself accepts a missing or unreadable log and then just delivers nothing.
-        // Asking for the log's properties throws in both cases.
+        // Asking for the log's properties and reading its ends throws in both cases.
         using (var session = new EventLogSession())
         {
-            _ = session.GetLogInformation(SysmonLog, PathType.LogName);
+            _ = session.GetLogInformation(options.LogName, PathType.LogName);
         }
 
-        using var watcher = new EventLogWatcher(new EventLogQuery(SysmonLog, PathType.LogName, "*"));
-        watcher.EventRecordWritten += OnEventRecordWritten;
-        watcher.Enabled = true;
-        logger.LogInformation("Subscribed to {Log}; waiting for events", SysmonLog);
+        var positionFile = new LogPositionFile(Path.Combine(options.DataDirectory, ServiceOptions.PositionFileName));
+        var plan = PlanResume(positionFile, out var newestAtStart);
 
-        var nextHostRefresh = DateTimeOffset.MinValue;
-        while (!stoppingToken.IsCancellationRequested)
+        // The host names must be known before old events are evaluated, or their connections would all look unknown.
+        await RefreshHostsAsync(config, engine, stoppingToken);
+        var nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
+
+        using var tail = new EventLogTail(
+            options.LogName,
+            plan.StartAfterRecordId,
+            entry => events.Writer.TryWrite(entry),
+            // The subscription is broken (log removed, Sysmon uninstalled, access lost). Closing the
+            // channel with the error ends the guard loop instead of leaving it waiting for nothing.
+            error => events.Writer.TryComplete(error));
+        tail.Start();
+        logger.LogInformation("Subscribed to {Log}; waiting for events", options.LogName);
+
+        LogPosition? unsaved = null;
+        var sinceSave = Stopwatch.StartNew();
+        var catchingUp = plan.Pending > 0;
+        var caughtUpFindings = 0;
+        try
         {
-            if (DateTimeOffset.UtcNow >= nextHostRefresh)
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await RefreshHostsAsync(config, engine, stoppingToken);
-                nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
-            }
+                if (DateTimeOffset.UtcNow >= nextHostRefresh)
+                {
+                    await RefreshHostsAsync(config, engine, stoppingToken);
+                    nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
+                }
 
-            using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            wait.CancelAfter(TimeSpan.FromSeconds(30));
-            string xml;
-            try
-            {
-                xml = await events.Reader.ReadAsync(wait.Token);
-            }
-            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-            {
-                continue; // Only woke up to check the host refresh.
-            }
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                wait.CancelAfter(unsaved is null ? TimeSpan.FromSeconds(30) : PositionSaveInterval);
+                LogEntry entry;
+                try
+                {
+                    entry = await events.Reader.ReadAsync(wait.Token);
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Only woke up to save the position or to check the host refresh.
+                    SavePosition(positionFile, ref unsaved, sinceSave);
+                    continue;
+                }
 
-            Handle(xml, engine, killer, store);
+                var late = catchingUp && entry.Position.RecordId <= newestAtStart;
+                var findings = Handle(entry.Xml, engine, killer, store, late);
+                unsaved = entry.Position;
+                if (findings > 0 || sinceSave.Elapsed >= PositionSaveInterval)
+                {
+                    // After a finding at once: read a second time, the event would be reported and acted on again.
+                    SavePosition(positionFile, ref unsaved, sinceSave);
+                }
+
+                if (catchingUp)
+                {
+                    caughtUpFindings += late ? findings : 0;
+                    if (entry.Position.RecordId >= newestAtStart)
+                    {
+                        catchingUp = false;
+                        logger.LogInformation(
+                            "Caught up with the Sysmon log: {Count} events from the time RCEGuard was not running, {Findings} findings",
+                            plan.Pending, caughtUpFindings);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            SavePosition(positionFile, ref unsaved, sinceSave);
+        }
+    }
+
+    /// <summary>Decides where reading continues and says so in the log.</summary>
+    private ResumePlan PlanResume(LogPositionFile positionFile, out long newestAtStart)
+    {
+        var saved = positionFile.Load(out var problem);
+        if (problem is not null)
+        {
+            logger.LogWarning("The saved position in the Sysmon log ({Path}) cannot be read and is ignored: {Reason}", positionFile.Path, problem);
+        }
+
+        var range = EventLogTail.Range(options.LogName);
+        var timeOfSaved = saved is null ? null : EventLogTail.TimeOf(options.LogName, saved.RecordId);
+        var plan = LogResume.Decide(saved, range?.Oldest, range?.Newest, timeOfSaved);
+        newestAtStart = range?.Newest.RecordId ?? 0;
+
+        switch (plan.Kind)
+        {
+            case ResumeKind.FirstStart:
+                logger.LogInformation("No saved position in the Sysmon log: reading from now on");
+                if (range is { } known)
+                {
+                    // Without it a guard that stops before the first event would start from scratch again.
+                    LogPosition? first = known.Newest;
+                    SavePosition(positionFile, ref first, Stopwatch.StartNew());
+                }
+
+                break;
+            case ResumeKind.Resume when plan.Pending == 0:
+                logger.LogInformation("Continuing in the Sysmon log after record {Record}; nothing was written in the meantime", plan.StartAfterRecordId);
+                break;
+            case ResumeKind.Resume:
+                logger.LogWarning(
+                    "Continuing in the Sysmon log after record {Record}: {Pending} events were written while RCEGuard was not running and are read now",
+                    plan.StartAfterRecordId, plan.Pending);
+                break;
+            case ResumeKind.LogReplaced:
+                logger.LogWarning(
+                    "The Sysmon log was cleared or replaced since RCEGuard last ran: reading all {Pending} events in it", plan.Pending);
+                break;
+            case ResumeKind.Overwritten:
+                logger.LogWarning(
+                    "{Lost} events were overwritten in the Sysmon log before RCEGuard could read them; reading the {Pending} that are left",
+                    plan.Lost, plan.Pending);
+                break;
+        }
+
+        return plan;
+    }
+
+    private void SavePosition(LogPositionFile positionFile, ref LogPosition? unsaved, Stopwatch sinceSave)
+    {
+        if (unsaved is null)
+        {
+            return;
+        }
+
+        try
+        {
+            positionFile.Save(unsaved);
+            unsaved = null;
+            sinceSave.Restart();
+            positionSaveFailed = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not fatal: the guard keeps working, it just could not note where it is. Tried again with the next event.
+            sinceSave.Restart();
+            if (!positionSaveFailed)
+            {
+                positionSaveFailed = true;
+                logger.LogWarning(
+                    "The position in the Sysmon log could not be saved to {Path}: {Reason}. After a restart, events may be read twice or missed",
+                    positionFile.Path, ex.Message);
+            }
         }
     }
 
@@ -137,38 +262,25 @@ public sealed class GuardWorker : BackgroundService
         foreach (var element in System.Xml.Linq.XDocument.Load(path).Root?.Elements() ?? [])
         {
             // No killer: the pids of old events belong to other programs by now, so they are not even looked up.
-            Handle(element.ToString(System.Xml.Linq.SaveOptions.DisableFormatting), engine, killer: null, store);
+            Handle(element.ToString(System.Xml.Linq.SaveOptions.DisableFormatting), engine, killer: null, store, late: false);
             count++;
         }
 
         logger.LogInformation("Replayed {Count} events from {Path}", count, path);
     }
 
-    private void OnEventRecordWritten(object? sender, EventRecordWrittenEventArgs args)
-    {
-        if (args.EventException is not null)
-        {
-            // The subscription is broken (log removed, Sysmon uninstalled, access lost). Closing the
-            // channel with the error ends the guard loop instead of leaving it waiting for nothing.
-            events.Writer.TryComplete(args.EventException);
-            return;
-        }
-
-        using var record = args.EventRecord;
-        if (record is not null)
-        {
-            events.Writer.TryWrite(record.ToXml());
-        }
-    }
-
-    private void Handle(string xml, RuleEngine engine, ProcessKiller? killer, FindingStore store)
+    /// <summary>Evaluates one event and acts on its findings.</summary>
+    /// <param name="late">The event was written while the guard was not running.</param>
+    /// <returns>The number of findings that were reported.</returns>
+    private int Handle(string xml, RuleEngine engine, ProcessKiller? killer, FindingStore store, bool late)
     {
         if (!SysmonEventParser.TryParse(xml, out var sysmonEvent, out var error))
         {
             logger.LogWarning("Skipped an event that could not be read: {Reason}", error);
-            return;
+            return 0;
         }
 
+        var reported = 0;
         foreach (var finding in engine.Evaluate(sysmonEvent!))
         {
             // The same alert again within the repeat window is counted on the stored finding, not reported anew.
@@ -184,9 +296,11 @@ public sealed class GuardWorker : BackgroundService
             {
                 taken = killer is null
                     ? "not acted on (replay)"
-                    : string.Join("; ", finding.KillTargets.Select(killer.Kill));
+                    // The time of the event lets the killer tell the process of the event from a later one with the same pid.
+                    : string.Join("; ", finding.KillTargets.Select(target => killer.Kill(target, finding.Time)));
             }
 
+            reported++;
             var rowId = store.Add(finding, taken);
             if (decision.Entry is { } entry)
             {
@@ -196,6 +310,11 @@ public sealed class GuardWorker : BackgroundService
             var repeats = decision.RepeatsBefore > 0
                 ? $" | seen {decision.RepeatsBefore} more time(s) since the previous report"
                 : string.Empty;
+            if (late)
+            {
+                repeats += " | written while RCEGuard was not running";
+            }
+
             var delayMs = (long)(DateTimeOffset.UtcNow - finding.Time).TotalMilliseconds;
             var level = finding.Severity switch
             {
@@ -208,6 +327,8 @@ public sealed class GuardWorker : BackgroundService
                 "{Rule} {Severity} [{Profile}] {Summary} | action: {Action} -> {Taken} | {Delay} ms after the event{Repeats}",
                 finding.RuleId, finding.Severity.ToString().ToUpperInvariant(), finding.Profile, finding.Summary, finding.Action, taken, delayMs, repeats);
         }
+
+        return reported;
     }
 
     private async Task RefreshHostsAsync(GuardConfig config, RuleEngine engine, CancellationToken cancellationToken)

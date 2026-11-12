@@ -18,6 +18,9 @@ public enum KillOutcome
     /// <summary>The pid now belongs to a different program; nothing was touched.</summary>
     ImageMismatch,
 
+    /// <summary>The pid runs the same program, but in a process started after the event; nothing was touched.</summary>
+    PidReused,
+
     /// <summary>Dry run: the process would have been terminated.</summary>
     DryRun,
 
@@ -35,14 +38,21 @@ public sealed record KillResult(KillTarget Target, KillOutcome Outcome, string M
 
 /// <summary>
 /// Terminates processes named by findings. A process is only terminated if its pid still runs the
-/// image the event named. The image is read with QueryFullProcessImageName on a limited-information
-/// handle: the address space of the process is never opened for reading.
+/// image the event named and, when the time of the event is known, was started before that event.
+/// Image and start time are read on a limited-information handle: the address space of the process
+/// is never opened for reading.
 /// </summary>
 public sealed class ProcessKiller
 {
     private const uint ProcessTerminate = 0x0001;
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const int ErrorInvalidParameter = 87;
+
+    /// <summary>
+    /// The search for left-behind programs relies on the pid of the exited process not having been
+    /// used by another process in between. That holds for a moment, not for an old event.
+    /// </summary>
+    public static readonly TimeSpan LeftBehindSearchMaxAge = TimeSpan.FromSeconds(30);
 
     private readonly bool dryRun;
 
@@ -54,19 +64,31 @@ public sealed class ProcessKiller
     /// exited (or its pid belongs to another program by now) and its start time is known, the
     /// programs it left behind are terminated as well.
     /// </summary>
-    public KillResult Kill(KillTarget target)
+    /// <param name="target">The process to terminate.</param>
+    /// <param name="eventTime">
+    /// Time of the event the finding is about. A process started after it cannot be the one the
+    /// event named, whatever its image; an event older than <see cref="LeftBehindSearchMaxAge"/>
+    /// is not followed by a search for left-behind programs.
+    /// </param>
+    public KillResult Kill(KillTarget target, DateTimeOffset? eventTime = null)
     {
-        var result = KillProcess(target);
+        var result = KillProcess(target, eventTime);
         if (!target.IncludeDescendants || target.StartedAt is not { } startedAt
-            || result.Outcome is not (KillOutcome.AlreadyExited or KillOutcome.ImageMismatch))
+            || result.Outcome is not (KillOutcome.AlreadyExited or KillOutcome.ImageMismatch or KillOutcome.PidReused))
         {
             return result;
+        }
+
+        if (eventTime is { } seen && DateTimeOffset.UtcNow - seen > LeftBehindSearchMaxAge)
+        {
+            var age = (long)(DateTimeOffset.UtcNow - seen).TotalSeconds;
+            return result with { Message = $"{result.Message}, left-behind programs not searched (the event is {age} s old)" };
         }
 
         // A running target was terminated together with its tree. Only a target that is gone can
         // have left something behind that no longer hangs below a running process.
         DateTimeOffset? reusedSince = null;
-        if (result.Outcome == KillOutcome.ImageMismatch)
+        if (result.Outcome is KillOutcome.ImageMismatch or KillOutcome.PidReused)
         {
             reusedSince = StartTimeOf(target.ProcessId);
             if (reusedSince is null)
@@ -158,7 +180,7 @@ public sealed class ProcessKiller
         }
     }
 
-    private KillResult KillProcess(KillTarget target)
+    private KillResult KillProcess(KillTarget target, DateTimeOffset? eventTime)
     {
         if (target.ProcessId <= 4 || target.ProcessId == Environment.ProcessId)
         {
@@ -184,6 +206,21 @@ public sealed class ProcessKiller
         if (image is null || !string.Equals(image, target.Image, StringComparison.OrdinalIgnoreCase))
         {
             return new KillResult(target, KillOutcome.ImageMismatch, $"pid now runs '{image ?? "unknown"}', left alone");
+        }
+
+        // Same program, but is it the same process? One that started after the event is not, e.g. a
+        // client started again while the guard was catching up on old events.
+        if (eventTime is { } seen)
+        {
+            if (StartTimeOf(handle) is not { } started)
+            {
+                return new KillResult(target, KillOutcome.Failed, "start time could not be read, left alone");
+            }
+
+            if (started > seen)
+            {
+                return new KillResult(target, KillOutcome.PidReused, "pid now runs a process started after the event, left alone");
+            }
         }
 
         if (dryRun)
@@ -217,6 +254,11 @@ public sealed class ProcessKiller
 
     private const uint StillActive = 259;
 
+    private static DateTimeOffset? StartTimeOf(SafeProcessHandle handle) =>
+        GetProcessTimes(handle, out var creation, out _, out _, out _)
+            ? new DateTimeOffset(DateTime.FromFileTimeUtc(creation))
+            : null;
+
     private static string? QueryImage(SafeProcessHandle handle)
     {
         var buffer = new char[1024];
@@ -230,6 +272,10 @@ public sealed class ProcessKiller
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

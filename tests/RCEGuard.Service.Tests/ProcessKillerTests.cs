@@ -172,6 +172,58 @@ public sealed class ProcessKillerTests : IDisposable
     }
 
     [Fact]
+    public void A_process_started_after_the_event_is_another_process_and_is_left_alone()
+    {
+        // An old event read after a restart of the guard: the pid runs the same program again, in a new process.
+        using var later = Start("/c ping -n 40 127.0.0.1 > nul");
+        var eventTime = new DateTimeOffset(later.StartTime).AddMinutes(-1);
+
+        var result = new ProcessKiller(dryRun: false).Kill(new KillTarget(later.Id, Cmd, IncludeDescendants: true), eventTime);
+
+        Assert.Equal(KillOutcome.PidReused, result.Outcome);
+        Assert.Contains("started after the event", result.Message);
+        Assert.True(IsRunning(later.Id));
+    }
+
+    [Fact]
+    public void A_process_started_before_the_event_is_terminated()
+    {
+        using var target = Start("/c ping -n 40 127.0.0.1 > nul");
+
+        var result = new ProcessKiller(dryRun: false).Kill(new KillTarget(target.Id, Cmd, IncludeDescendants: true), eventTime: DateTimeOffset.UtcNow);
+
+        Assert.Equal(KillOutcome.Terminated, result.Outcome);
+        Assert.True(WaitUntilGone(target.Id));
+    }
+
+    [Fact]
+    public void After_a_recent_event_the_left_behind_program_is_terminated()
+    {
+        var (parentPid, parentStarted, leftBehind) = StartAndLeaveBehind();
+
+        var result = new ProcessKiller(dryRun: false).Kill(
+            new KillTarget(parentPid, Cmd, IncludeDescendants: true, StartedAt: parentStarted), eventTime: DateTimeOffset.UtcNow);
+
+        Assert.Contains("left behind", result.Message);
+        Assert.True(WaitUntilGone(leftBehind), "the left-behind program is still running");
+    }
+
+    [Fact]
+    public void After_an_old_event_left_behind_programs_are_not_searched()
+    {
+        // The pid of the exited child may have had other owners since; their children must not be mistaken for its own.
+        var (parentPid, parentStarted, leftBehind) = StartAndLeaveBehind();
+        var old = DateTimeOffset.UtcNow - ProcessKiller.LeftBehindSearchMaxAge - TimeSpan.FromSeconds(5);
+
+        var result = new ProcessKiller(dryRun: false).Kill(
+            new KillTarget(parentPid, Cmd, IncludeDescendants: true, StartedAt: parentStarted), eventTime: old);
+
+        Assert.Equal(KillOutcome.AlreadyExited, result.Outcome);
+        Assert.Contains("not searched", result.Message);
+        Assert.True(IsRunning(leftBehind));
+    }
+
+    [Fact]
     public void A_pid_that_runs_another_program_is_left_alone_and_so_are_its_children()
     {
         // The event named another image for this pid: the pid was reused. What the new owner
