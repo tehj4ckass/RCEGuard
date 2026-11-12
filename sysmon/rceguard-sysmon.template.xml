@@ -1,0 +1,97 @@
+<!--
+  RCEGuard Sysmon configuration (template).
+
+  scripts/install.ps1 renders this file: {{CLIENT_IMAGE}} becomes the full path of the
+  monitored game client (e.g. D:\Games\Warmane\Wow.exe), {{GAME_DIR}} its folder with a
+  trailing backslash. Do not load the template itself into Sysmon.
+
+  Design rules:
+  - Only events caused by the monitored client are recorded. Nothing is logged globally
+    except process starts whose command line looks like a coin miner (R9).
+  - Sysmon combines different field names inside one filter with AND. Filters that need
+    OR across fields are wrapped in a RuleGroup with groupRelation="or".
+  - The sensor is deliberately broad for the client; RCEGuard.Service decides what is an
+    alert. Rule names (R1, R3 ...) appear as RuleName in the event and map to docs/KONZEPT.md.
+  - Every event type RCEGuard does not use is switched off with an empty include filter.
+-->
+<Sysmon schemaversion="4.50">
+  <HashAlgorithms>SHA256</HashAlgorithms>
+  <CheckRevocation>False</CheckRevocation>
+
+  <EventFiltering>
+
+    <!-- Event 1: child processes of the client (R1), client starts, miner-like command lines (R9) -->
+    <RuleGroup name="rceguard-process-create" groupRelation="or">
+      <ProcessCreate onmatch="include">
+        <ParentImage name="R1" condition="is">{{CLIENT_IMAGE}}</ParentImage>
+        <Image name="client-start" condition="is">{{CLIENT_IMAGE}}</Image>
+        <CommandLine name="R9" condition="contains any">stratum+tcp;stratum+ssl;xmrig;--donate-level</CommandLine>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- Event 5: end of a client session -->
+    <ProcessTerminate onmatch="include">
+      <Image name="client-exit" condition="is">{{CLIENT_IMAGE}}</Image>
+    </ProcessTerminate>
+
+    <!-- Event 3: every outbound connection of the client (R2, allowlist is applied by the service) -->
+    <NetworkConnect onmatch="include">
+      <Image name="R2" condition="is">{{CLIENT_IMAGE}}</Image>
+    </NetworkConnect>
+
+    <!-- Event 22: DNS queries of the client (feeds the learning mode and the hostname allowlist) -->
+    <DnsQuery onmatch="include">
+      <Image name="dns" condition="is">{{CLIENT_IMAGE}}</Image>
+    </DnsQuery>
+
+    <!--
+      Event 11: files created by the client (R3). Only the data folders the client writes to
+      all the time are excluded. The game folder itself stays monitored on purpose: a DLL
+      dropped next to the client would be loaded on the next start.
+    -->
+    <FileCreate onmatch="include">
+      <Image name="R3" condition="is">{{CLIENT_IMAGE}}</Image>
+    </FileCreate>
+    <FileCreate onmatch="exclude">
+      <TargetFilename condition="begin with">{{GAME_DIR}}Cache\</TargetFilename>
+      <TargetFilename condition="begin with">{{GAME_DIR}}WTF\</TargetFilename>
+      <TargetFilename condition="begin with">{{GAME_DIR}}Logs\</TargetFilename>
+      <TargetFilename condition="begin with">{{GAME_DIR}}Interface\</TargetFilename>
+      <TargetFilename condition="begin with">{{GAME_DIR}}Screenshots\</TargetFilename>
+      <TargetFilename condition="begin with">{{GAME_DIR}}Errors\</TargetFilename>
+    </FileCreate>
+
+    <!-- Events 12/13/14: registry writes of the client (R4, key filtering is done by the service) -->
+    <RegistryEvent onmatch="include">
+      <Image name="R4" condition="is">{{CLIENT_IMAGE}}</Image>
+    </RegistryEvent>
+
+    <!-- Event 7: modules loaded into the client only (R5); never enable this globally -->
+    <ImageLoad onmatch="include">
+      <Image name="R5" condition="is">{{CLIENT_IMAGE}}</Image>
+    </ImageLoad>
+
+    <!-- Event 8: the client starts a thread in another process (R6) -->
+    <CreateRemoteThread onmatch="include">
+      <SourceImage name="R6" condition="is">{{CLIENT_IMAGE}}</SourceImage>
+    </CreateRemoteThread>
+
+    <!-- Event 10: the client opens another process (R7, log only until the learning mode has data) -->
+    <ProcessAccess onmatch="include">
+      <SourceImage name="R7" condition="is">{{CLIENT_IMAGE}}</SourceImage>
+    </ProcessAccess>
+
+    <!-- Not used by RCEGuard: switched off -->
+    <FileCreateTime onmatch="include" />
+    <DriverLoad onmatch="include" />
+    <RawAccessRead onmatch="include" />
+    <FileCreateStreamHash onmatch="include" />
+    <PipeEvent onmatch="include" />
+    <WmiEvent onmatch="include" />
+    <FileDelete onmatch="include" />
+    <ClipboardChange onmatch="include" />
+    <ProcessTampering onmatch="include" />
+    <FileDeleteDetected onmatch="include" />
+
+  </EventFiltering>
+</Sysmon>

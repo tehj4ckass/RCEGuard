@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# Rendered Sysmon configurations and local test data (contain local paths)
+sysmon/*.rendered.xml
+out/
+
+# Secrets and local settings never belong in the repository
+.env
+appsettings.local.json
+*.db
+*.db-shm
+*.db-wal
+
+# Local agent session state
+.claude/autoharness/

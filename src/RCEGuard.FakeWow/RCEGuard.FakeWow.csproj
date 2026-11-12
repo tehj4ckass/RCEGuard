@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Sysmon filters on the image path, so the simulator has to run as Wow.exe. -->
+    <AssemblyName>Wow</AssemblyName>
+    <RootNamespace>RCEGuard.FakeWow</RootNamespace>
+  </PropertyGroup>
+
+</Project>
