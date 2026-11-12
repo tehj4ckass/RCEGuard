@@ -360,7 +360,17 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     position“). Die Prüfung „Neustart nach Abbruch“ fiel im selben Lauf durch, weil das Skript 30 s wartete, Windows
     den Dienst nach dem dritten Abbruch des Tages aber erst nach 60 s neu startet (so eingestellt: 5 s, 5 s, dann
     60 s; Zähler für einen Tag). Das Skript wartet jetzt bis 90 s und nennt die Dauer.
-- **Offen in M2:** Abnahme mit `-InstalledService` für den Stand mit dem korrigierten Abo (alle sieben Szenarien,
-  darunter `repeat`, und die Selbstprüfung im echten Dienst).
-- **Bis dahin gilt:** Der am 12.11.2026 um 21:14 installierte Dienst sieht keine neuen Ereignisse; er holt sie erst
-  bei seinem nächsten Start nach.
+  - *Abnahme mit dem korrigierten Abo (12.11.2026, 21:49, installierter Dienst):* Der Dienst setzte nach Record 5084
+    fort, holte 124 Ereignisse nach (6 Befunde, alle Prozesse längst beendet, nichts angefasst) und bekam danach die
+    neuen Ereignisse. Sechs von sieben Szenarien bestanden mit 342 bis 1015 ms, darunter `repeat` zum ersten Mal als
+    Administrator (ein Befund, `repeats = 2` in `findings.db`) und `detach` (zurückgelassenes Programm beendet). Alle
+    Dienstprüfungen bestanden: Neustart nach 61 s (dritter Abbruch des Tages), danach 40 Ereignisse nachgeholt, das
+    während des Ausfalls gestartete Programm 60 s nach dem Ereignis gefunden, Kind und Client beendet. Die
+    Selbstprüfung schlug in den Minuten danach nicht fälschlich an.
+  - *Das eine FAIL (`spawn`) war ein Fehler des Skripts:* Der Dienst fand das Szenario nach 1052 ms und beendete
+    Kind und Client. Das Skript zählte aber auch die drei alten R1-Befunde mit, die der Dienst direkt nach seinem
+    Start nachholte (Ereignisse aus Trockenläufen, 1179 s alt), und nahm deren Alter als Reaktionszeit. Es
+    überspringt jetzt Zeilen mit dem Zusatz „written while RCEGuard was not running“; geprüft an den echten Logzeilen
+    dieses Laufs in PowerShell 7 und 5.1 (13 Zeilen, ein gezählter Befund: R1 mit 1052 ms).
+- **Offen in M2:** ein Abnahmelauf mit `-InstalledService`, in dem alle sieben Szenarien bestehen (korrigiertes
+  Skript); die Selbstprüfung hat im echten Dienst noch nie ausgelöst, weil das Abo seither liefert.

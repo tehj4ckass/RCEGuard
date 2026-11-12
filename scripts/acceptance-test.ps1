@@ -144,6 +144,8 @@ function Get-FoundRules([string[]] $lines) {
     foreach ($line in $lines) {
         # Not a finding about the scenario: Windows attaches a console host to the hidden simulator.
         if ($line -match 'Windows attached a console to the game client') { continue }
+        # Not about the scenario either: an event from before the guard started, which it reads right after its start.
+        if ($line -match 'written while RCEGuard was not running') { continue }
         if ($line -match '\b(R\d+) (CRITICAL|HIGH|MEDIUM|INFO) \[.*\| (\d+) ms after the event') {
             [pscustomobject]@{ Rule = $Matches[1]; DelayMs = [int] $Matches[3]; Line = $line }
         }
