@@ -16,7 +16,7 @@ started under the name WowGuard.
 
 | Milestone | Content | State |
 | :--- | :--- | :--- |
-| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install and all simulator scenarios verified with Sysmon 15.22, `uninstall.ps1` not yet run |
+| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install, uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the retry after a failed manifest registration, and the removal of the leftover `C:\Windows\Sysmon64.exe` |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console, **live run against Sysmon not yet verified**; not yet installed as a Windows service; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
@@ -178,6 +178,17 @@ look at the configuration without installing anything (no admin rights needed):
 .\scripts\render-config.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -OutFile out\rceguard.rendered.xml
 ```
 
+## If installing Sysmon fails
+
+Sysmon 15 sometimes cannot register its event manifest on recent Windows builds. The output then
+ends with `wevtutil.exe returned failure` and `Event manifest installation failed` (exit code 13),
+and a half-registered event publisher stays behind. `install.ps1` handles this: it removes such
+leftovers (`sysmon -u force`), tries once more, and removes everything again if the second attempt
+fails too. In that case restart Windows and run the script again.
+
+`install.ps1` never forces an uninstall while a Sysmon service or the driver `SysmonDrv` is
+present.
+
 ## What the sensor records
 
 Only events caused by the configured client, plus process starts anywhere whose command line
@@ -208,6 +219,7 @@ sysmon/rceguard-sysmon.template.xml    Sysmon configuration template
 scripts/render-config.ps1              renders the template for one client (no admin)
 scripts/install.ps1                    installs Sysmon / loads the configuration (admin)
 scripts/uninstall.ps1                  removes the sensor again (admin)
+scripts/SysmonTools.ps1                shared Sysmon helpers of the two scripts above
 scripts/show-events.ps1                prints or saves recorded events (admin)
 scripts/acceptance-test.ps1            simulator scenarios against the running guard (admin)
 src/RCEGuard.Core/                     rule engine, event parser, configuration (no OS dependencies)
@@ -216,3 +228,7 @@ src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
 tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
 build.ps1                              build wrapper that insists on a real .NET SDK
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).

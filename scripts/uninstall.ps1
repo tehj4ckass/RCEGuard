@@ -34,20 +34,13 @@ $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 $sysmonExe = $state.sysmonExe
 $sysmonPresent = $sysmonExe -and (Test-Path -LiteralPath $sysmonExe -PathType Leaf)
 
-function Invoke-Sysmon([string] $exe, [string[]] $arguments, [string] $what) {
-    # Windows PowerShell 5.1 turns redirected stderr lines into terminating errors under 'Stop'.
-    $ErrorActionPreference = 'Continue'
-    $output = & $exe @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "$what failed (exit code $LASTEXITCODE):`n$($output -join "`n")"
-    }
-}
+. (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 
 if (-not $sysmonPresent) {
     Write-Warning "Sysmon binary '$sysmonExe' not found; it seems to have been removed already."
 }
 elseif ($state.sysmonInstalledByRceGuard) {
-    Invoke-Sysmon $sysmonExe @('-u') 'Sysmon uninstall'
+    Invoke-Sysmon $sysmonExe @('-u') 'Sysmon uninstall' | Out-Null
     # 'sysmon -u' removes service and driver but leaves its own binary in the Windows folder.
     $windowsDir = [IO.Path]::GetFullPath($env:windir).TrimEnd('\')
     $leftInWindows = [string]::Equals([IO.Path]::GetDirectoryName($sysmonExe), $windowsDir, [StringComparison]::OrdinalIgnoreCase)
@@ -57,7 +50,7 @@ elseif ($state.sysmonInstalledByRceGuard) {
     Write-Host 'Sysmon uninstalled.'
 }
 else {
-    Invoke-Sysmon $sysmonExe @('-c', '--') 'Resetting the Sysmon configuration'
+    Invoke-Sysmon $sysmonExe @('-c', '--') 'Resetting the Sysmon configuration' | Out-Null
     Write-Host 'Sysmon was not installed by RCEGuard: it stays installed and is back on its default rules.'
 }
 

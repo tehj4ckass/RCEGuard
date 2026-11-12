@@ -190,6 +190,14 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   ist das eine eigene Warnung, weil eingeschleuster Code dann den Dienst angreifen könnte.
 - **Menge:** Rund 33 ImageLoad-Ereignisse je Start des Simulators, sonst nur einzelne Ereignisse je Szenario.
 - **Testdaten:** Die Ereignisse enthalten Benutzername, SID und Anmelde-IDs. Fixtures werden vor dem Einchecken anonymisiert.
+- **Installation, Manifest-Fehler (12.11.2026):** Die zweite Installation nach einer Deinstallation scheiterte mit
+  Exit-Code 13 („wevtutil.exe returned failure“, „Event manifest installation failed“; Sysmon 15.22, Windows 11
+  Build 26300). Danach war der Ereignis-Publisher halb registriert (Registry-Schlüssel vorhanden, Kanal nicht lesbar),
+  Dienst und Treiber fehlten, `C:\Windows\Sysmon64.exe` lag da. Derselbe Fehler ist für Sysmon 15 auf Windows Server 2025
+  beschrieben; eine Ursache nennt Microsoft nicht, ein zweiter Versuch nach `sysmon -u force` soll gelingen.
+  `install.ps1` räumt solche Reste deshalb weg und versucht es genau einmal neu; scheitert auch das, bleibt nichts zurück.
+  `-u force` läuft nie, wenn ein Sysmon-Dienst oder der Treiber `SysmonDrv` vorhanden ist (erzwungenes Entladen eines
+  Treibers hat laut Berichten Rechner neu gestartet). Am echten Sysmon noch nicht bestätigt.
 
 ## 14. Entscheidungen bei der Umsetzung von M2
 

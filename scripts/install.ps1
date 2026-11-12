@@ -14,6 +14,11 @@
     existing one. -ReplaceExistingConfig overrides that; the old rules are dumped to a text
     file first, but they cannot be restored automatically.
 
+    Sysmon 15 sometimes fails to register its event manifest on recent Windows builds
+    ("wevtutil.exe returned failure", exit code 13). The script then removes what the attempt
+    left behind and tries once more; if that fails too, it leaves nothing behind and asks for a
+    restart.
+
     Sysmon is not shipped with RCEGuard. Pass a Sysmon64.exe you downloaded from Microsoft
     with -SysmonPath, or let the script fetch it from download.sysinternals.com with
     -DownloadSysmon. Installing Sysmon requires accepting the Sysinternals licence terms
@@ -44,30 +49,13 @@ $configPath = Join-Path $dataDir 'sysmon-config.xml'
 $statePath = Join-Path $dataDir 'install-state.json'
 $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 
-function Get-InstalledSysmon {
-    # The service is named after the binary that installed it.
-    $service = Get-CimInstance Win32_Service -Filter "Name='Sysmon64' OR Name='Sysmon' OR Name='Sysmon64a'" |
-        Select-Object -First 1
-    if ($null -eq $service) { return $null }
-    $exe = ($service.PathName -replace '^"([^"]+)".*$', '$1').Trim()
-    [pscustomobject]@{ ServiceName = $service.Name; Exe = $exe }
-}
+. (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 
 function Assert-MicrosoftSigned([string] $path) {
     $signature = Get-AuthenticodeSignature -LiteralPath $path
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
         throw "'$path' is not a validly signed Microsoft binary (status: $($signature.Status)). Aborting."
     }
-}
-
-function Invoke-Sysmon([string] $exe, [string[]] $arguments) {
-    # Windows PowerShell 5.1 turns redirected stderr lines into terminating errors under 'Stop'.
-    $ErrorActionPreference = 'Continue'
-    $output = & $exe @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Sysmon failed (exit code $LASTEXITCODE): $exe $($arguments -join ' ')`n$($output -join "`n")"
-    }
-    $output
 }
 
 # --- 1. Data folder, writable by administrators and SYSTEM only -------------------------------
@@ -137,7 +125,17 @@ else {
             throw "Sysmon binary not found: '$SysmonPath'."
         }
         Assert-MicrosoftSigned $SysmonPath
-        Invoke-Sysmon $SysmonPath @('-accepteula', '-i', $configPath) | Out-Null
+        Install-SysmonWithRetry $SysmonPath $configPath
+    }
+    catch {
+        # Nothing was installed: do not leave the data folder of a sensor that does not exist.
+        if (-not (Test-Path -LiteralPath $statePath)) {
+            Remove-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
+            if (@(Get-ChildItem -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                Remove-Item -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue
+            }
+        }
+        throw
     }
     finally {
         if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
