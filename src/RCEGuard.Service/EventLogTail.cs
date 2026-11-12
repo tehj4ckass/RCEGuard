@@ -14,6 +14,12 @@ public sealed record LogEntry(string Xml, LogPosition Position);
 /// Reads an event log from a given record on: first what is already in the log after that record,
 /// in order, then every new event as it is written.
 /// </summary>
+/// <remarks>
+/// The place to continue is given to Windows as a bookmark of that record, not as a query on the
+/// record id. A subscription with the query <c>EventRecordID &gt; N</c> delivers what is already in
+/// the log and then, on a log like the one of Sysmon, nothing that is written later (measured on
+/// Windows 11, November 2026; the Application log does not show this).
+/// </remarks>
 public sealed class EventLogTail : IDisposable
 {
     private readonly EventLogWatcher watcher;
@@ -22,15 +28,19 @@ public sealed class EventLogTail : IDisposable
 
     /// <summary>Prepares reading <paramref name="logName"/> after the record <paramref name="afterRecordId"/>.</summary>
     /// <param name="logName">Name of the log (channel).</param>
-    /// <param name="afterRecordId">Only events with a higher record id are delivered.</param>
+    /// <param name="afterRecordId">
+    /// Reading continues after the event with this record id. If the log holds no such event, the
+    /// whole log is read.
+    /// </param>
     /// <param name="onEntry">Called for every event, on a thread of the log subscription.</param>
     /// <param name="onError">Called when the subscription breaks (log removed, access lost).</param>
     public EventLogTail(string logName, long afterRecordId, Action<LogEntry> onEntry, Action<Exception> onError)
     {
         this.onEntry = onEntry;
         this.onError = onError;
-        var query = new EventLogQuery(logName, PathType.LogName, RecordsAfter(afterRecordId));
-        watcher = new EventLogWatcher(query, bookmark: null, readExistingEvents: true);
+        var query = new EventLogQuery(logName, PathType.LogName, "*");
+        // Without a bookmark the subscription starts at the oldest event in the log.
+        watcher = new EventLogWatcher(query, BookmarkOf(logName, afterRecordId), readExistingEvents: true);
         watcher.EventRecordWritten += OnEventRecordWritten;
     }
 
@@ -44,16 +54,16 @@ public sealed class EventLogTail : IDisposable
     public static (LogPosition Oldest, LogPosition Newest)? Range(string logName)
     {
         var oldest = First(new EventLogQuery(logName, PathType.LogName, "*"));
-        var newest = First(new EventLogQuery(logName, PathType.LogName, "*") { ReverseDirection = true });
+        var newest = Newest(logName);
         return oldest is null || newest is null ? null : (oldest, newest);
     }
 
+    /// <summary>Returns the newest event of a log, or null if the log is empty. Throws like <see cref="Range"/>.</summary>
+    public static LogPosition? Newest(string logName) =>
+        First(new EventLogQuery(logName, PathType.LogName, "*") { ReverseDirection = true });
+
     /// <summary>Returns the time of the event with this record id, or null if the log has no such event.</summary>
-    public static DateTimeOffset? TimeOf(string logName, long recordId)
-    {
-        var query = new EventLogQuery(logName, PathType.LogName, $"*[System[EventRecordID={recordId.ToString(CultureInfo.InvariantCulture)}]]");
-        return First(query)?.TimeCreated;
-    }
+    public static DateTimeOffset? TimeOf(string logName, long recordId) => First(Record(logName, recordId))?.TimeCreated;
 
     /// <inheritdoc />
     public void Dispose()
@@ -62,8 +72,21 @@ public sealed class EventLogTail : IDisposable
         watcher.Dispose();
     }
 
-    private static string RecordsAfter(long recordId) =>
-        $"*[System[EventRecordID > {recordId.ToString(CultureInfo.InvariantCulture)}]]";
+    private static EventLogQuery Record(string logName, long recordId) =>
+        new(logName, PathType.LogName, $"*[System[EventRecordID={recordId.ToString(CultureInfo.InvariantCulture)}]]");
+
+    /// <summary>The bookmark of the event with this record id, or null if the log holds no such event.</summary>
+    private static EventBookmark? BookmarkOf(string logName, long recordId)
+    {
+        if (recordId <= 0)
+        {
+            return null;
+        }
+
+        using var reader = new EventLogReader(Record(logName, recordId));
+        using var record = reader.ReadEvent();
+        return record?.Bookmark;
+    }
 
     private static LogPosition? First(EventLogQuery query)
     {

@@ -22,12 +22,33 @@ public sealed class GuardWorker : BackgroundService
     /// <summary>The position is saved at once after a finding, otherwise at most this often.</summary>
     private static readonly TimeSpan PositionSaveInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>How often a quiet guard looks whether the log holds events it was not given.</summary>
+    private static readonly TimeSpan DeliveryCheckInterval = TimeSpan.FromSeconds(15);
+
     private readonly ServiceOptions options;
     private readonly ILogger<GuardWorker> logger;
     private readonly IHostApplicationLifetime lifetime;
     private readonly Channel<LogEntry> events = Channel.CreateUnbounded<LogEntry>(new UnboundedChannelOptions { SingleReader = true });
     private FindingDebouncer debouncer = new(TimeSpan.Zero);
     private bool positionSaveFailed;
+
+    /// <summary>
+    /// An event may be in the log this long before its delivery counts as missing. Delivery normally
+    /// takes milliseconds; the margin keeps a busy machine from looking like a broken subscription.
+    /// </summary>
+    internal TimeSpan DeliveryGrace { get; init; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>The logger of this worker, for tests.</summary>
+    internal ILogger<GuardWorker> Logger => logger;
+
+    /// <summary>Opens the subscription to the log. Tests replace it to see what a quiet subscription leads to.</summary>
+    internal Func<string, long, Action<LogEntry>, Action<Exception>, IDisposable> OpenTail { get; init; } =
+        (logName, afterRecordId, onEntry, onError) =>
+        {
+            var tail = new EventLogTail(logName, afterRecordId, onEntry, onError);
+            tail.Start();
+            return tail;
+        };
 
     /// <summary>Creates the worker.</summary>
     public GuardWorker(ServiceOptions options, ILogger<GuardWorker> logger, IHostApplicationLifetime lifetime)
@@ -109,18 +130,20 @@ public sealed class GuardWorker : BackgroundService
         await RefreshHostsAsync(config, engine, stoppingToken);
         var nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
 
-        using var tail = new EventLogTail(
+        using var tail = OpenTail(
             options.LogName,
             plan.StartAfterRecordId,
             entry => events.Writer.TryWrite(entry),
             // The subscription is broken (log removed, Sysmon uninstalled, access lost). Closing the
             // channel with the error ends the guard loop instead of leaving it waiting for nothing.
             error => events.Writer.TryComplete(error));
-        tail.Start();
         logger.LogInformation("Subscribed to {Log}; waiting for events", options.LogName);
 
         LogPosition? unsaved = null;
         var sinceSave = Stopwatch.StartNew();
+        var lastDelivered = plan.StartAfterRecordId;
+        var sinceDeliveryCheck = Stopwatch.StartNew();
+        var idleWait = DeliveryGrace < DeliveryCheckInterval ? DeliveryGrace : DeliveryCheckInterval;
         var catchingUp = plan.Pending > 0;
         var caughtUpFindings = 0;
         try
@@ -134,7 +157,7 @@ public sealed class GuardWorker : BackgroundService
                 }
 
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                wait.CancelAfter(unsaved is null ? TimeSpan.FromSeconds(30) : PositionSaveInterval);
+                wait.CancelAfter(unsaved is null ? idleWait : PositionSaveInterval);
                 LogEntry entry;
                 try
                 {
@@ -142,11 +165,23 @@ public sealed class GuardWorker : BackgroundService
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
                 {
-                    // Only woke up to save the position or to check the host refresh.
+                    // Nothing came. Save the position and look whether that is right: is the log as quiet as the subscription?
                     SavePosition(positionFile, ref unsaved, sinceSave);
+                    if (sinceDeliveryCheck.Elapsed >= idleWait)
+                    {
+                        sinceDeliveryCheck.Restart();
+                        var newest = EventLogTail.Newest(options.LogName);
+                        if (LogResume.HasUndelivered(lastDelivered, newest, DateTimeOffset.UtcNow, DeliveryGrace))
+                        {
+                            // Fail closed: ending here makes Windows restart the service, and the start reads what was missed.
+                            throw new LogDeliveryException(lastDelivered, newest!.RecordId);
+                        }
+                    }
+
                     continue;
                 }
 
+                lastDelivered = entry.Position.RecordId;
                 var late = catchingUp && entry.Position.RecordId <= newestAtStart;
                 var findings = Handle(entry.Xml, engine, killer, store, late);
                 unsaved = entry.Position;
@@ -363,8 +398,22 @@ public sealed class GuardWorker : BackgroundService
         UnauthorizedAccessException => "no access to the Sysmon log. Start the console as administrator, or run RCEGuard as a service.",
         EventLogNotFoundException => "the Sysmon log does not exist. Install the sensor with scripts\\install.ps1 first.",
         EventLogException => $"the Sysmon log cannot be read: {ex.Message}",
+        LogDeliveryException => ex.Message,
         FileNotFoundException or FormatException or System.Xml.XmlException => ex.Message,
         Microsoft.Data.Sqlite.SqliteException => $"the findings database in '{options.DataDirectory}' cannot be opened: {ex.Message}",
         _ => ex.ToString(),
     };
+}
+
+/// <summary>The log holds events that the subscription did not deliver.</summary>
+public sealed class LogDeliveryException : Exception
+{
+    /// <summary>Creates the exception.</summary>
+    /// <param name="lastDelivered">Record id of the last delivered event.</param>
+    /// <param name="newest">Record id of the newest event in the log.</param>
+    public LogDeliveryException(long lastDelivered, long newest)
+        : base($"the Sysmon log holds events up to record {newest} that were not delivered to RCEGuard (last delivered: {lastDelivered}). " +
+               "Ending, so that Windows restarts the service; the start reads what was missed.")
+    {
+    }
 }

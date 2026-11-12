@@ -76,4 +76,15 @@ public static class LogResume
         var lost = oldest.RecordId - saved.RecordId - 1;
         return new ResumePlan(lost == 0 ? ResumeKind.Resume : ResumeKind.Overwritten, oldest.RecordId - 1, inLog, lost);
     }
+
+    /// <summary>
+    /// Tells whether the log holds an event that should have been delivered by now. A subscription
+    /// can go quiet without an error; then the guard watches nothing and does not know it.
+    /// </summary>
+    /// <param name="lastDeliveredRecordId">Record id of the last event the subscription delivered (or the one reading started after).</param>
+    /// <param name="newest">Newest event in the log, or null if the log is empty.</param>
+    /// <param name="now">Current time.</param>
+    /// <param name="grace">How long an event may be in the log before its delivery counts as missing.</param>
+    public static bool HasUndelivered(long lastDeliveredRecordId, LogPosition? newest, DateTimeOffset now, TimeSpan grace) =>
+        newest is not null && newest.RecordId > lastDeliveredRecordId && now - newest.TimeCreated > grace;
 }

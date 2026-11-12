@@ -278,7 +278,9 @@ try {
             $dependsOn = @(Get-Service -Name $script:GuardServiceName | ForEach-Object { $_.ServicesDependedOn } | ForEach-Object { $_.Name }) -join ','
             $checks += [pscustomobject]@{ Check = 'depends on Sysmon'; Value = $dependsOn; Result = $(if ($dependsOn -match '^Sysmon') { 'PASS' } else { 'FAIL' }) }
 
-            # Windows must restart the service when its process dies (recovery actions, first restart after 5 s).
+            # Windows must restart the service when its process dies (recovery actions). It does so after
+            # 5 s the first two times within a day and after 60 s from the third time on, and this test
+            # counts: on a day with several runs the restart takes a minute.
             $oldPid = [int] $registered.ProcessId
             $offset = Get-FileLength $serviceLog
             Write-Host "Ending the service process ($oldPid) to see whether Windows restarts it ..."
@@ -287,10 +289,11 @@ try {
             # While the service is down the client starts a program. The restarted service must find
             # that in the Sysmon log and act on it, although it was not running when it happened.
             $missedOut = Join-Path $OutDir 'm2-missed.out'
-            $missed = Start-Process -FilePath $client -ArgumentList @('--spawn', '--hold', '30') -RedirectStandardOutput $missedOut -PassThru -WindowStyle Hidden
+            $missed = Start-Process -FilePath $client -ArgumentList @('--spawn', '--hold', '100') -RedirectStandardOutput $missedOut -PassThru -WindowStyle Hidden
             $null = $missed.Handle
 
-            $deadline = (Get-Date).AddSeconds(30)
+            $ended = Get-Date
+            $deadline = $ended.AddSeconds(90)
             $restarted = $false
             do {
                 Start-Sleep -Milliseconds 500
@@ -298,7 +301,8 @@ try {
                 $restarted = $null -ne $now -and $now.State -eq 'Running' -and [int] $now.ProcessId -notin @(0, $oldPid) -and ((Read-TextFrom $serviceLog $offset) -match 'Subscribed to')
             } while (-not $restarted -and (Get-Date) -lt $deadline)
             $newPid = if ($null -ne $now) { [int] $now.ProcessId } else { 0 }
-            $checks += [pscustomobject]@{ Check = 'restarted after its process was ended'; Value = "pid $oldPid -> $newPid"; Result = $(if ($restarted) { 'PASS' } else { 'FAIL' }) }
+            $downSeconds = [int] ((Get-Date) - $ended).TotalSeconds
+            $checks += [pscustomobject]@{ Check = 'restarted after its process was ended'; Value = "pid $oldPid -> $newPid after $downSeconds s"; Result = $(if ($restarted) { 'PASS' } else { 'FAIL' }) }
 
             $missedEnded = $missed.WaitForExit(45000)
             if (-not $missedEnded) { & taskkill.exe /PID $missed.Id /T /F 2>&1 | Out-Null }

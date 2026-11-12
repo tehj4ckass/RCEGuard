@@ -31,21 +31,90 @@ public sealed class GuardWorkerResumeTests : IDisposable
     private LogPositionFile PositionFile => new(Path.Combine(folder, ServiceOptions.PositionFileName));
 
     /// <summary>Runs the worker until it has logged a line containing <paramref name="until"/>, then stops it.</summary>
-    private async Task<List<string>> RunWorkerAsync(string until)
+    private Task<List<string>> RunWorkerAsync(string until) =>
+        RunWorkerAsync(new GuardWorker(Options(Log), new ListLogger(), new Lifetime()), lines => lines.Any(line => line.Contains(until)));
+
+    private ServiceOptions Options(string log) => new() { DataDirectory = folder, LogName = log, DryRun = true };
+
+    /// <summary>Runs a worker until <paramref name="done"/> says so (or it gives up), then stops it.</summary>
+    private static async Task<List<string>> RunWorkerAsync(GuardWorker worker, Func<IReadOnlyCollection<string>, bool> done, Action? afterSubscribing = null)
     {
-        var logger = new ListLogger();
-        var options = new ServiceOptions { DataDirectory = folder, LogName = Log, DryRun = true };
-        var worker = new GuardWorker(options, logger, new Lifetime());
+        var logger = (ListLogger)worker.Logger;
         await worker.StartAsync(CancellationToken.None);
         var watch = Stopwatch.StartNew();
-        while (!logger.Lines.Any(line => line.Contains(until)) && !logger.Lines.Any(line => line.Contains("cannot run")) && watch.ElapsedMilliseconds < 15_000)
+        var acted = afterSubscribing is null;
+        while (!done(logger.Lines) && !logger.Lines.Any(line => line.Contains("cannot run")) && watch.ElapsedMilliseconds < 20_000)
         {
+            if (!acted && logger.Lines.Any(line => line.Contains("Subscribed to")))
+            {
+                acted = true;
+                afterSubscribing!();
+            }
+
             await Task.Delay(50);
         }
 
         await worker.StopAsync(CancellationToken.None);
         worker.Dispose();
         return [.. logger.Lines];
+    }
+
+    [Fact]
+    public async Task An_event_written_after_the_start_is_handled_and_moves_the_position()
+    {
+        // A log of the kind Sysmon writes; the Application log would not have shown the fault this test is for.
+        var newestBefore = EventLogTail.Newest(ManifestLog.Name)!;
+        PositionFile.Save(newestBefore);
+        var worker = new GuardWorker(Options(ManifestLog.Name), new ListLogger(), new Lifetime());
+
+        var lines = await RunWorkerAsync(
+            worker,
+            logged => PositionFile.Load(out var problem) is { } saved && saved.RecordId > newestBefore.RecordId,
+            afterSubscribing: () => ManifestLog.WriteEvents());
+
+        Assert.DoesNotContain(lines, line => line.Contains("cannot run"));
+        var position = PositionFile.Load(out _);
+        Assert.NotNull(position);
+        Assert.True(position.RecordId > newestBefore.RecordId, $"the position stayed at {position.RecordId}: the event written after the start was not handled");
+    }
+
+    [Fact]
+    public async Task A_subscription_that_delivers_nothing_while_the_log_grows_ends_the_guard()
+    {
+        PositionFile.Save(EventLogTail.Newest(ManifestLog.Name)!);
+        var worker = new GuardWorker(Options(ManifestLog.Name), new ListLogger(), new Lifetime())
+        {
+            DeliveryGrace = TimeSpan.FromSeconds(1),
+            // A subscription that Windows accepted and that stays silent.
+            OpenTail = (_, _, _, _) => new MemoryStream(),
+        };
+
+        List<string> lines;
+        try
+        {
+            lines = await RunWorkerAsync(worker, _ => false, afterSubscribing: () => ManifestLog.WriteEvents());
+        }
+        finally
+        {
+            // Outside a Windows service the worker reports the failure through the exit code of the process: here, the test run.
+            Environment.ExitCode = 0;
+        }
+
+        Assert.Contains(lines, line => line.Contains("cannot run") && line.Contains("were not delivered"));
+    }
+
+    [Fact]
+    public async Task A_quiet_log_does_not_end_the_guard()
+    {
+        // Nothing is written to the log of this test, so a silent subscription is right.
+        PositionFile.Save(EventLogTail.Newest(ManifestLog.Name)!);
+        var worker = new GuardWorker(Options(ManifestLog.Name), new ListLogger(), new Lifetime()) { DeliveryGrace = TimeSpan.FromSeconds(2) };
+        var watch = Stopwatch.StartNew();
+
+        var lines = await RunWorkerAsync(worker, _ => watch.ElapsedMilliseconds > 5000);
+
+        // Another program may start Windows PowerShell during the test; its events are delivered, so that is no fault either.
+        Assert.DoesNotContain(lines, line => line.Contains("cannot run"));
     }
 
     [Fact]
@@ -117,21 +186,7 @@ public sealed class GuardWorkerResumeTests : IDisposable
         Assert.Null(problem);
     }
 
-    private static List<LogPosition> ReadNewest(int count)
-    {
-        var positions = new List<LogPosition>();
-        using var reader = new EventLogReader(new EventLogQuery(Log, PathType.LogName, "*") { ReverseDirection = true });
-        while (positions.Count < count && reader.ReadEvent() is { } record)
-        {
-            using (record)
-            {
-                positions.Add(new LogPosition(record.RecordId ?? 0, new DateTimeOffset(record.TimeCreated!.Value.ToUniversalTime())));
-            }
-        }
-
-        positions.Reverse();
-        return positions;
-    }
+    private static List<LogPosition> ReadNewest(int count) => ManifestLog.ReadNewest(Log, count);
 
     private sealed class ListLogger : ILogger<GuardWorker>
     {

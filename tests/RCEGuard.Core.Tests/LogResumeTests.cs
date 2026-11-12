@@ -4,6 +4,36 @@ namespace RCEGuard.Core.Tests;
 
 public sealed class LogResumeTests
 {
+    private static readonly DateTimeOffset Noon = new(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
+    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(15);
+
+    [Fact]
+    public void An_event_in_the_log_that_was_not_delivered_in_time_is_missing()
+    {
+        var newest = new LogPosition(101, Noon.AddSeconds(-20));
+
+        Assert.True(LogResume.HasUndelivered(lastDeliveredRecordId: 100, newest, Noon, Grace));
+    }
+
+    [Fact]
+    public void An_event_that_was_just_written_may_still_be_on_its_way()
+    {
+        var newest = new LogPosition(101, Noon.AddSeconds(-2));
+
+        Assert.False(LogResume.HasUndelivered(lastDeliveredRecordId: 100, newest, Noon, Grace));
+    }
+
+    [Fact]
+    public void Nothing_is_missing_when_the_newest_event_was_delivered_or_the_log_is_empty()
+    {
+        var newest = new LogPosition(100, Noon.AddHours(-3));
+
+        Assert.False(LogResume.HasUndelivered(lastDeliveredRecordId: 100, newest, Noon, Grace));
+        Assert.False(LogResume.HasUndelivered(lastDeliveredRecordId: 100, newest: null, Noon, Grace));
+        // A cleared log starts counting again: lower ids than the last delivered one are no sign of a fault.
+        Assert.False(LogResume.HasUndelivered(lastDeliveredRecordId: 5000, new LogPosition(3, Noon.AddHours(-1)), Noon, Grace));
+    }
+
     private static readonly DateTimeOffset T0 = new(2026, 11, 12, 18, 0, 0, TimeSpan.Zero);
 
     private static LogPosition At(long recordId) => new(recordId, T0.AddSeconds(recordId));

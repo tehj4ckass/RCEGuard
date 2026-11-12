@@ -307,11 +307,29 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   Record-ID und Zeit des zuletzt verarbeiteten Ereignisses in `sysmon-position.json` im Datenordner (nach einem Befund
   sofort, sonst höchstens einmal je Sekunde, dazu beim Beenden; Schreiben über eine Zwischendatei). Beim Start liest er
   zuerst alles, was danach ins Log geschrieben wurde, und danach wie bisher die neuen Ereignisse.
-  - *Kein Windows-Lesezeichen (`EventBookmark`), sondern Record-ID plus Zeit.* Das Abo fragt `EventRecordID > N` ab und
-    liest vorhandene Einträge mit. Die Zeit erkennt ein ersetztes Log: Gibt es den Record mit der gespeicherten ID nicht
-    mehr oder trägt er eine andere Zeit (Sysmon neu installiert, Log geleert), wird das ganze Log gelesen. Sind
-    Ereignisse nach der Position schon überschrieben, meldet der Dienst, wie viele fehlen. Der allererste Start liest
-    nichts Altes und speichert die Position des neuesten Eintrags.
+  - *Gespeichert wird Record-ID plus Zeit, nicht das Windows-Lesezeichen (`EventBookmark`) selbst.* Die Zeit erkennt
+    ein ersetztes Log: Gibt es den Record mit der gespeicherten ID nicht mehr oder trägt er eine andere Zeit (Sysmon
+    neu installiert, Log geleert), wird das ganze Log gelesen. Sind Ereignisse nach der Position schon überschrieben,
+    meldet der Dienst, wie viele fehlen. Der allererste Start liest nichts Altes und speichert die Position des
+    neuesten Eintrags.
+  - *Das Abo setzt über ein Lesezeichen des gespeicherten Records fort, nicht über eine Abfrage auf die Record-ID
+    (Befund 12.11.2026, 21:17).* Der erste Stand abonnierte mit der Abfrage `EventRecordID > N` und „vorhandene
+    Ereignisse mitlesen“. Im Abnahmelauf fielen damit alle sieben Szenarien durch: Der Dienst bekam nach dem Start
+    kein einziges neues Ereignis (2,5 Minuten lang, ohne Fehlermeldung), das Nachholen nach dem Neustart
+    funktionierte dagegen (321 Ereignisse, 18 Befunde, Client beendet). Nachgestellt ohne Admin-Rechte am Kanal
+    `Microsoft-Windows-PowerShell/Operational`, der wie das Sysmon-Log von einem Anbieter mit Manifest beschrieben
+    wird: Mit der Abfrage auf die Record-ID kommen die vorhandenen Ereignisse (5 von 5) und danach keines der neu
+    geschriebenen (0 von 3); mit einem Lesezeichen kommen beide (5 von 5, 3 von 3), ebenso ohne Abfrage wie im Stand
+    davor. Am Application-Log liefern beide Formen auch neue Ereignisse, deshalb liefen die Tests des ersten Stands
+    durch. Warum Windows sich so verhält, ist nicht geklärt; gemessen auf Windows 11 (Build 26300). Jetzt liest der
+    Dienst den Record mit der gespeicherten ID, nimmt dessen Lesezeichen und abonniert ohne Abfrage ab dort. Gibt es
+    den Record nicht, liest er das Log von vorn.
+  - *Selbstprüfung gegen ein stummes Abo.* Der Fehler oben blieb 2,5 Minuten unbemerkt, und der Dienst sah dabei
+    gesund aus. Deshalb sieht der Dienst selbst ins Log, wenn 15 s lang nichts kam: Liegt dort ein Ereignis, das
+    neuer ist als das zuletzt gelieferte und älter als 15 s, schreibt er „RCEGuard cannot run“ mit beiden Record-IDs
+    und beendet sich mit Fehler. Windows startet den Dienst neu, und der Start holt das Verpasste nach. Kosten: ein
+    Lesezugriff auf den neuesten Eintrag alle 15 s im Leerlauf. Bliebe ein Abo dauerhaft stumm, liefe der Dienst
+    dadurch als Abfrage im Takt der Neustarts weiter (5 s, 5 s, dann 60 s), statt blind zu sein.
   - *Nachgeholte Ereignisse lösen dieselben Aktionen aus*, im Log mit dem Zusatz „written while RCEGuard was not
     running“. Weil sie alt sein können, gilt zusätzlich: Ein Prozess wird nur beendet, wenn er vor dem Ereignis
     gestartet wurde (Startzeit über ein Handle mit eingeschränkten Rechten; gleiche PID und gleiches Programm in einem
@@ -328,7 +346,21 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     Dienst weiter und warnt einmal.
   - *Test:* Entscheidungslogik in `LogResumeTests`; Abo, Positionsdatei und die ganze Dienstschleife über Stoppen und
     Starten in `tests/RCEGuard.Service.Tests` gegen das Application-Log dieses Rechners (nur lesend), weil das
-    Sysmon-Log Admin-Rechte braucht. Der Beender mit Startzeit-Prüfung und Altersgrenze gegen echte Prozesse. Das
-    Abnahmeskript startet während des Ausfalls des Dienstes ein Szenario und verlangt Befund und Beenden danach; dieser
-    Teil lief bisher nur mit einem Ersatz für den Dienst.
-- **Offen in M2:** Abnahme mit `-InstalledService` für die Position im Sysmon-Log und das Szenario `repeat`.
+    Sysmon-Log Admin-Rechte braucht. Der Beender mit Startzeit-Prüfung und Altersgrenze gegen echte Prozesse.
+    Seit dem Befund oben zusätzlich gegen `Microsoft-Windows-PowerShell/Operational` (Kanal derselben Bauart wie das
+    Sysmon-Log, für normale Benutzer lesbar; ein Start der Windows PowerShell 5.1 schreibt dort Ereignisse): Ereignisse,
+    die nach dem Start des Abos geschrieben werden, kommen an, nach den vorhandenen, in Reihenfolge und ohne
+    Doppelte; die Dienstschleife verarbeitet ein solches Ereignis und rückt die Position vor; ein Abo, das nichts
+    liefert, während das Log wächst, beendet den Dienst; ein stilles Log beendet ihn nicht. Gegenprobe: Mit dem alten
+    Abo fallen vier dieser Tests durch. Lehre: Ein Ersatz-Log muss von derselben Bauart sein wie das echte, und ein
+    Test des Abos muss Ereignisse enthalten, die nach dem Abonnieren entstehen.
+  - *Abnahme:* Das Abnahmeskript startet während des Ausfalls des Dienstes ein Szenario und verlangt Befund und
+    Beenden danach. Im Lauf vom 12.11.2026, 21:17 bestand genau dieser Teil gegen Sysmon (Befund 60 s nach dem
+    Ereignis, mit Zusatz im Log, Client beendet; `sysmon-position.json` geschrieben; erster Start: „No saved
+    position“). Die Prüfung „Neustart nach Abbruch“ fiel im selben Lauf durch, weil das Skript 30 s wartete, Windows
+    den Dienst nach dem dritten Abbruch des Tages aber erst nach 60 s neu startet (so eingestellt: 5 s, 5 s, dann
+    60 s; Zähler für einen Tag). Das Skript wartet jetzt bis 90 s und nennt die Dauer.
+- **Offen in M2:** Abnahme mit `-InstalledService` für den Stand mit dem korrigierten Abo (alle sieben Szenarien,
+  darunter `repeat`, und die Selbstprüfung im echten Dienst).
+- **Bis dahin gilt:** Der am 12.11.2026 um 21:14 installierte Dienst sieht keine neuen Ereignisse; er holt sie erst
+  bei seinem nächsten Start nach.

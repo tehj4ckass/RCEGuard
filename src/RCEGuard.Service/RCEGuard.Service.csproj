@@ -19,4 +19,9 @@
     <ProjectReference Include="..\RCEGuard.Core\RCEGuard.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The tests replace the log subscription of the worker to see what it does when nothing is delivered. -->
+    <InternalsVisibleTo Include="RCEGuard.Service.Tests" />
+  </ItemGroup>
+
 </Project>
