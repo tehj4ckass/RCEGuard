@@ -16,8 +16,8 @@ started under the name WowGuard.
 
 | Milestone | Content | State |
 | :--- | :--- | :--- |
-| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install, uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the retry after a failed manifest registration, and the removal of the leftover `C:\Windows\Sysmon64.exe` |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. First live run against Sysmon: every scenario detected within 0.8–1.2 s, but 2 of 5 failed because the console host of the hidden simulator counted as a child process. **Fixed, rerun not yet done.** Not yet installed as a Windows service; toast moved to M4 |
+| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. **Not yet installed as a Windows service**; grandchildren of the client are not tracked yet; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -145,8 +145,8 @@ folder, started with nothing but a console handle on its command line. Windows s
 for every console program that gets its own console. `conhost.exe` with any other arguments (it
 can start other programs) is an ordinary R1.
 
-Findings arrive about one second after the event, because Windows delivers log entries in
-batches. A child process therefore runs for about a second before it is terminated; stopping it
+Findings arrive 0.7 to 1.1 seconds after the event (measured in the acceptance test), because
+Windows delivers log entries in batches. A child process therefore runs for about a second before it is terminated; stopping it
 from starting at all is the job of M3.
 
 The guard stops with an error instead of idling if it cannot read the Sysmon log.

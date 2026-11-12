@@ -74,7 +74,7 @@ public sealed class GuardWorker : BackgroundService
 
         if (options.ReplayPath is not null)
         {
-            Replay(options.ReplayPath, engine, killer, store);
+            Replay(options.ReplayPath, engine, store);
             lifetime.StopApplication();
             return;
         }
@@ -116,7 +116,7 @@ public sealed class GuardWorker : BackgroundService
         }
     }
 
-    private void Replay(string path, RuleEngine engine, ProcessKiller killer, FindingStore store)
+    private void Replay(string path, RuleEngine engine, FindingStore store)
     {
         if (!File.Exists(path))
         {
@@ -126,7 +126,8 @@ public sealed class GuardWorker : BackgroundService
         var count = 0;
         foreach (var element in System.Xml.Linq.XDocument.Load(path).Root?.Elements() ?? [])
         {
-            Handle(element.ToString(System.Xml.Linq.SaveOptions.DisableFormatting), engine, killer, store);
+            // No killer: the pids of old events belong to other programs by now, so they are not even looked up.
+            Handle(element.ToString(System.Xml.Linq.SaveOptions.DisableFormatting), engine, killer: null, store);
             count++;
         }
 
@@ -150,7 +151,7 @@ public sealed class GuardWorker : BackgroundService
         }
     }
 
-    private void Handle(string xml, RuleEngine engine, ProcessKiller killer, FindingStore store)
+    private void Handle(string xml, RuleEngine engine, ProcessKiller? killer, FindingStore store)
     {
         if (!SysmonEventParser.TryParse(xml, out var sysmonEvent, out var error))
         {
@@ -163,7 +164,9 @@ public sealed class GuardWorker : BackgroundService
             var taken = "none";
             if (finding.Action == FindingAction.Kill)
             {
-                taken = string.Join("; ", finding.KillTargets.Select(killer.Kill));
+                taken = killer is null
+                    ? "not acted on (replay)"
+                    : string.Join("; ", finding.KillTargets.Select(killer.Kill));
             }
 
             store.Add(finding, taken);

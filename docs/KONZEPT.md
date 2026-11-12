@@ -197,7 +197,8 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   beschrieben; eine Ursache nennt Microsoft nicht, ein zweiter Versuch nach `sysmon -u force` soll gelingen.
   `install.ps1` räumt solche Reste deshalb weg und versucht es genau einmal neu; scheitert auch das, bleibt nichts zurück.
   `-u force` läuft nie, wenn ein Sysmon-Dienst oder der Treiber `SysmonDrv` vorhanden ist (erzwungenes Entladen eines
-  Treibers hat laut Berichten Rechner neu gestartet). Am echten Sysmon noch nicht bestätigt.
+  Treibers hat laut Berichten Rechner neu gestartet). Der Weg „Reste wegräumen, dann installieren“ hat am 12.11.2026 am
+  echten Sysmon funktioniert; der Neuversuch innerhalb desselben Laufs ist nur gegen einen Ersatz-Sysmon geprüft.
 
 ## 14. Entscheidungen bei der Umsetzung von M2
 
@@ -221,7 +222,12 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   `-ForceV1`) wird jetzt als R1 MITTEL protokolliert und beendet nichts. `conhost.exe` mit anderen Argumenten bleibt ein
   normales R1, weil es selbst Programme starten kann (`conhost.exe --headless cmd …`). Der echte Client ist ein
   Fensterprogramm und bekommt keinen Konsolen-Host; taucht einer auf, steht er im Log.
-- **Reaktionszeit.** Im Live-Lauf lagen zwischen Ereignis und Befund 0,75 bis 1,15 s; das Ereignisprotokoll liefert in
+- **Abnahme bestanden (12.11.2026, Sysmon 15.22).** Zweiter Live-Lauf mit der Korrektur: alle fünf Szenarien erkannt,
+  `spawn`, `miner-args` und `runkey` beendet, `connect` und `drop` nur alarmiert. Der aufgezeichnete Konsolen-Host
+  (`… conhost.exe 0xffffffff -ForceV1`) ist als Fixture `r1-console-host.xml` übernommen.
+- **Replay fragt keine laufenden Prozesse ab.** Beim Auswerten des Laufs meldete das Replay zu einer alten PID „läuft jetzt
+  ein anderes Programm“ (die Prüfung vor dem Beenden hatte gegriffen). Im Replay wird der Beender jetzt gar nicht aufgerufen.
+- **Reaktionszeit.** In beiden Live-Läufen lagen zwischen Ereignis und Befund 0,65 bis 1,15 s; das Ereignisprotokoll liefert in
   Schüben. Ein Kindprozess läuft also rund eine Sekunde, bevor er beendet wird. Das Abnahmekriterium (2 s) ist erfüllt,
   verhindern kann den Start aber nur M3 (`DisallowChildProcessCreation`). Ob ein eigener ETW-Abnehmer schneller wäre, ist
   offen.

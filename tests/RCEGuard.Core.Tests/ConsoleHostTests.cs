@@ -6,8 +6,9 @@ namespace RCEGuard.Core.Tests;
 /// <summary>
 /// R1 and the console host. Windows starts conhost.exe as a child of every console program that
 /// gets its own console; the acceptance test of M2 ran into that (the simulator is a console
-/// program and was started hidden). The events are synthetic; image and command line are the ones
-/// Windows 11 showed for the simulator: "\??\C:\WINDOWS\system32\conhost.exe 0x4".
+/// program and was started hidden). One event is recorded (fixture r1-console-host), the others
+/// are synthetic; "\??\C:\WINDOWS\system32\conhost.exe 0x4" is what Windows 11 showed for a
+/// simulator started in a visible window.
 /// </summary>
 public class ConsoleHostTests
 {
@@ -25,6 +26,19 @@ public class ConsoleHostTests
         ("ParentProcessGuid", ClientGuid),
         ("ParentProcessId", "20100"),
         ("ParentImage", Client));
+
+    [Fact]
+    public void Recorded_console_host_of_the_hidden_simulator_is_logged_and_nothing_is_terminated()
+    {
+        // Recorded in the acceptance run of M2: "\??\C:\WINDOWS\system32\conhost.exe 0xffffffff -ForceV1".
+        var finding = Assert.Single(TestData.Engine().Evaluate(TestData.Fixture("r1-console-host")));
+
+        Assert.Equal("R1", finding.RuleId);
+        Assert.Equal(Severity.Medium, finding.Severity);
+        Assert.Equal(FindingAction.Log, finding.Action);
+        Assert.Empty(finding.KillTargets);
+        Assert.Equal(@"C:\Windows\System32\conhost.exe", finding.Target);
+    }
 
     [Theory]
     [InlineData(@"C:\WINDOWS\system32\conhost.exe", @"\??\C:\WINDOWS\system32\conhost.exe 0x4")]

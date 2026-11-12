@@ -13,6 +13,7 @@ all of these.
 | :--- | :--- | :--- |
 | `client-start.xml` | any | the client itself starts; no finding |
 | `r1-child-process.xml` | `--spawn` | R1 |
+| `r1-console-host.xml` | any, started hidden (acceptance test) | console host Windows attaches to a console program; R1 logged, nothing terminated |
 | `r1-miner-child.xml` | `--miner-args` | R1 and R9; Sysmon names only `R1` |
 | `r2-network-connect.xml` | `--connect` | R2 |
 | `r3-file-create-appdata.xml` | `--drop` | R3 |
