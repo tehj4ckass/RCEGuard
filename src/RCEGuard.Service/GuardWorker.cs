@@ -59,7 +59,7 @@ public sealed class GuardWorker : BackgroundService
         var config = options.LoadConfig(out var configSource);
         // A replay is about old events: their pids mean nothing any more, so it never terminates anything.
         var killEnabled = config.KillEnabled && !options.DryRun && options.ReplayPath is null;
-        var engine = new RuleEngine(config);
+        var engine = new RuleEngine(config, Environment.SystemDirectory);
         var killer = new ProcessKiller(dryRun: !killEnabled);
         using var store = new FindingStore(Path.Combine(options.DataDirectory, "findings.db"));
 

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Sysmon;
 
@@ -22,11 +23,27 @@ public sealed class RuleEngine
     // Process GUID of a child -> process GUID of the client that started it.
     private readonly Dictionary<string, string> childToClient = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly string consoleHostImage;
+    private readonly Regex consoleHostCommandLine;
+
     /// <summary>Creates an engine for a validated configuration.</summary>
-    public RuleEngine(GuardConfig config)
+    /// <param name="config">Profiles to watch.</param>
+    /// <param name="systemDirectory">
+    /// The Windows system directory of the watched machine (the service passes its own);
+    /// used to recognise the console host that Windows itself starts for a console program.
+    /// </param>
+    public RuleEngine(GuardConfig config, string systemDirectory = @"C:\Windows\System32")
     {
         GuardConfigJson.Validate(config);
         this.config = config;
+        consoleHostImage = systemDirectory.TrimEnd('\\') + @"\conhost.exe";
+
+        // Exactly what the kernel passes: the NT path of conhost.exe and the handle of the console
+        // session, e.g. "\??\C:\WINDOWS\system32\conhost.exe 0x4". Anything else on the command line
+        // (conhost.exe can start other programs) stays an ordinary R1.
+        consoleHostCommandLine = new Regex(
+            @"^\\\?\?\\" + Regex.Escape(consoleHostImage) + @" 0x[0-9a-f]{1,16}( -ForceV1)?$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         foreach (var profile in config.Profiles)
         {
             staticAllowlists[profile.Name] = new RemoteAllowlist(profile.AllowedRemote);
@@ -79,7 +96,28 @@ public sealed class RuleEngine
         var findings = new List<Finding>();
         IReadOnlyList<KillTarget> killChildAndClient = [];
 
-        if (parentProfile is not null)
+        if (parentProfile is not null && IsConsoleHostStartedByWindows(image, commandLine))
+        {
+            // Windows starts conhost.exe as a child of every console program that gets its own console.
+            // The client did not choose that program and it runs nothing else, so it is no reason to
+            // terminate anything. A graphical client has no console, hence still worth a log line.
+            RememberChild(e.Get("ProcessGuid"), e.Get("ParentProcessGuid"));
+            findings.Add(new Finding
+            {
+                RuleId = "R1",
+                Severity = Severity.Medium,
+                Action = FindingAction.Log,
+                Summary = "Windows attached a console to the game client (conhost.exe)",
+                Profile = parentProfile.Name,
+                Image = parentImage,
+                ProcessId = e.GetInt("ParentProcessId"),
+                Target = image,
+                CommandLine = commandLine,
+                Time = e.TimeCreated,
+                RecordId = e.RecordId,
+            });
+        }
+        else if (parentProfile is not null)
         {
             RememberChild(e.Get("ProcessGuid"), e.Get("ParentProcessGuid"));
 
@@ -135,6 +173,9 @@ public sealed class RuleEngine
 
         return findings;
     }
+
+    private bool IsConsoleHostStartedByWindows(string image, string commandLine) =>
+        PathRules.Same(image, consoleHostImage) && consoleHostCommandLine.IsMatch(commandLine);
 
     private IReadOnlyList<Finding> OnProcessTerminate(SysmonEvent e)
     {

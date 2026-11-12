@@ -214,6 +214,17 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   statt ohne Ereignisse weiterzulaufen. Eine nicht lesbare Zieladresse gilt bei R2 als nicht erlaubt.
 - **Toast erst in M4.** Ein Dienst in Sitzung 0 kann keine Toasts anzeigen; das übernimmt die Tray-App. Bis dahin steht ein
   Alarm in der Konsole bzw. im Log und in `findings.db`.
+- **R1, Konsolen-Host (erster Live-Lauf, 12.11.2026).** Windows startet für jedes Konsolenprogramm mit eigener Konsole
+  `conhost.exe` als dessen Kindprozess (`\??\C:\WINDOWS\system32\conhost.exe 0x4`). Der Simulator ist ein Konsolenprogramm
+  und wurde im Abnahmetest versteckt gestartet; R1 beendete ihn deshalb in jedem Szenario, auch in denen, die nur alarmieren
+  sollen (2 von 5 fehlgeschlagen). Genau diese Form (Image im Systemordner, Kommandozeile nur NT-Pfad und Handle, optional
+  `-ForceV1`) wird jetzt als R1 MITTEL protokolliert und beendet nichts. `conhost.exe` mit anderen Argumenten bleibt ein
+  normales R1, weil es selbst Programme starten kann (`conhost.exe --headless cmd …`). Der echte Client ist ein
+  Fensterprogramm und bekommt keinen Konsolen-Host; taucht einer auf, steht er im Log.
+- **Reaktionszeit.** Im Live-Lauf lagen zwischen Ereignis und Befund 0,75 bis 1,15 s; das Ereignisprotokoll liefert in
+  Schüben. Ein Kindprozess läuft also rund eine Sekunde, bevor er beendet wird. Das Abnahmekriterium (2 s) ist erfüllt,
+  verhindern kann den Start aber nur M3 (`DisallowChildProcessCreation`). Ob ein eigener ETW-Abnehmer schneller wäre, ist
+  offen.
 - **Regelidee „Client läuft als Administrator“** (Abschnitt 13) ist nicht umgesetzt und wartet auf eine Entscheidung.
 - **Offen in M2:** Registrierung als Windows-Dienst (`LocalSystem`) in `install.ps1`/`uninstall.ps1`, Verfolgung von
   Enkelprozessen, Entprellen wiederholter Alarme.

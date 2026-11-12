@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install, uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the retry after a failed manifest registration, and the removal of the leftover `C:\Windows\Sysmon64.exe` |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console, **live run against Sysmon not yet verified**; not yet installed as a Windows service; toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. First live run against Sysmon: every scenario detected within 0.8–1.2 s, but 2 of 5 failed because the console host of the hidden simulator counted as a child process. **Fixed, rerun not yet done.** Not yet installed as a Windows service; toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -123,6 +123,7 @@ What the rules do:
 | Rule | Trigger | Severity | Action |
 | :--- | :--- | :--- | :--- |
 | R1 | the client starts any program | critical | terminate child and client |
+| R1 | Windows attaches a console host (`conhost.exe`) to the client | medium | log |
 | R2 | connection to an address that is not allowed (loopback is always allowed) | critical | alert; terminate only with `killOnUnknownRemote` |
 | R3 | program file created anywhere, or any file in a Startup folder | high | alert |
 | R3 | other file outside the game folder | medium | log |
@@ -139,6 +140,15 @@ A process is only terminated if its pid still runs the program the event named. 
 `findings.db` (SQLite) in the data folder. "Alert" currently means a line in the console; the
 notification itself comes with the tray app in M4, because a service cannot show toasts.
 
+The console host is only recognised in its exact form: `conhost.exe` from the Windows system
+folder, started with nothing but a console handle on its command line. Windows starts it that way
+for every console program that gets its own console. `conhost.exe` with any other arguments (it
+can start other programs) is an ordinary R1.
+
+Findings arrive about one second after the event, because Windows delivers log entries in
+batches. A child process therefore runs for about a second before it is terminated; stopping it
+from starting at all is the job of M3.
+
 The guard stops with an error instead of idling if it cannot read the Sysmon log.
 
 ### Acceptance test
@@ -151,8 +161,8 @@ within 2 s and that the critical ones are terminated. In an administrator PowerS
 .\scripts\acceptance-test.ps1 -DownloadSysmon -AcceptSysmonEula
 ```
 
-It installs the sensor for the test client if needed and writes `out\m2-result.txt` and
-`out\m2-service.log`. The simulator switch `--hold [seconds]` used by the test keeps the client
+It installs the sensor for the test client if needed and writes `out\m2-result.txt`,
+`out\m2-service.log` and the recorded events as `out\m2-events.xml`. The simulator switch `--hold [seconds]` used by the test keeps the client
 (and for `--spawn` its child) alive, so the guard has something to terminate; a client that
 survives exits with code 3.
 

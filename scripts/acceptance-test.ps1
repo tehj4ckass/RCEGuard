@@ -10,7 +10,12 @@
       1. makes sure the sensor is installed for the test client (calls install.ps1 if needed),
       2. starts RCEGuard.Service in the background, logging to <OutDir>\m2-service.log,
       3. runs each scenario with --hold, so the client is still alive when the guard reacts,
-      4. stops the service and writes <OutDir>\m2-result.txt.
+      4. saves the recorded events to <OutDir>\m2-events.xml,
+      5. stops the service and writes <OutDir>\m2-result.txt.
+
+    The simulator is a console program and is started hidden, so Windows attaches a console host
+    (conhost.exe) to it as a child process. The guard logs that as R1 without terminating anything;
+    the test leaves that line out of its "Found" column.
 
     Needs an administrator PowerShell (Sysmon log, install). Build first with .\build.ps1 and
     publish the simulator to the test folder (see README).
@@ -77,6 +82,7 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $serviceLog = Join-Path $OutDir 'm2-service.log'
 $resultFile = Join-Path $OutDir 'm2-result.txt'
 $scenarioOut = Join-Path $OutDir 'm2-scenario.out'
+$eventsFile = Join-Path $OutDir 'm2-events.xml'
 
 # Scenario, expected rules, and whether the guard must terminate the client.
 $scenarios = @(
@@ -102,6 +108,8 @@ function Read-SharedLines([string] $path) {
 function Get-FoundRules([string[]] $lines) {
     # Finding lines look like: "... R1 CRITICAL [Profile] summary | action: Kill -> ... | 123 ms after the event"
     foreach ($line in $lines) {
+        # Not a finding about the scenario: Windows attaches a console host to the hidden simulator.
+        if ($line -match 'Windows attached a console to the game client') { continue }
         if ($line -match '\b(R\d+) (CRITICAL|HIGH|MEDIUM|INFO) \[.*\| (\d+) ms after the event') {
             [pscustomobject]@{ Rule = $Matches[1]; DelayMs = [int] $Matches[3]; Line = $line }
         }
@@ -184,6 +192,13 @@ try {
             Client   = $outcome
             Result   = if ($detected -and $inTime -and $killOk) { 'PASS' } else { 'FAIL' }
         }
+    }
+
+    # Keep the raw events of this run: material for test fixtures and for looking into a failure.
+    # They contain user and machine names, so they stay in the ignored out folder.
+    if ($isAdmin) {
+        try { & (Join-Path $PSScriptRoot 'show-events.ps1') -Last 800 -OutFile $eventsFile }
+        catch { Write-Warning "Could not save the events of this run: $($_.Exception.Message)" }
     }
 }
 finally {
