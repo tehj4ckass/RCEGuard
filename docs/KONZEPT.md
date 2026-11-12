@@ -166,3 +166,27 @@ RCEGuard/
 - Es ist zu prüfen, ob Exploit Protection `DisallowChildProcessCreation` den Client oder Launcher stört, z. B. beim Öffnen von Links aus dem Spiel oder beim Fehlerreporter.
 - Sysmon-Events sind nachträglich, also „detect & respond“: Eine Aktion ist zum Zeitpunkt der Meldung bereits passiert. Echtes Vorab-Blocken leisten nur Firewall und Exploit Protection.
 - Optionale Ergänzung: Der Client wird mit dem stoneharry-RCEPatcher gepatcht. Das liegt außerhalb dieses Projekts, wird aber im README empfohlen.
+
+## 13. Erkenntnisse aus M1 (Sensor-Test mit dem Simulator, Sysmon 15.22)
+
+Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Regel-Engine in M2 folgt daraus:
+
+- **R4, Fehlalarm über `Services`:** Startet der Client einen Kindprozess, schreibt Windows unter dem Namen des Clients
+  nach `HKLM\System\CurrentControlSet\Services\bam\State\UserSettings\<SID>\…` (Background Activity Moderator). Ein
+  Muster „enthält `\Services\`“ wäre falsch. R4 braucht genaue Schlüssel (z. B. `Services\<Name>\ImagePath`, `Start`) und
+  schließt `Services\bam\` aus.
+- **R4, Schreibweise:** `HKCU` erscheint als `HKU\<SID>\…`. Abgeglichen wird das Ende des Pfads
+  (`\Software\Microsoft\Windows\CurrentVersion\Run\<Wert>`), nicht der Wurzelname. Setzen kommt als Ereignis 13, Löschen als 12.
+- **R7, erwarteter Zugriff:** Jeder Kindprozess erzeugt zusätzlich einen ProcessAccess des Clients auf das Kind mit
+  `GrantedAccess=0x1fffff`. R7 muss den Zugriff auf eigene Kinder aus R1 zuordnen, statt ihn getrennt zu melden.
+- **R9, Regelname:** Ein Kindprozess mit Miner-Kommandozeile trägt den Regelnamen `R1`, weil Sysmon nur die erste
+  passende Regel nennt. Die Engine prüft die Kommandozeile deshalb selbst und verlässt sich nicht auf `RuleName`.
+  R9 für Prozesse, die nicht vom Client abstammen, ist noch nicht getestet.
+- **R5, Client-Image:** Das Laden der eigenen `Wow.exe` kommt als ImageLoad; beim Simulator ohne Signatur
+  (`SignatureStatus=Unavailable`). R5 nimmt das Client-Image aus und vergleicht Pfade ohne Groß-/Kleinschreibung
+  (`C:\Windows\System32` und `C:\WINDOWS\SYSTEM32` kommen beide vor).
+- **R2, Hostname:** Bei einer Verbindung auf eine IP steht `DestinationHostname=-`; ein DNS-Ereignis gibt es dann nicht.
+- **Neue Regelidee:** ProcessCreate enthält `IntegrityLevel`. Läuft der Client mit `High` (als Administrator gestartet),
+  ist das eine eigene Warnung, weil eingeschleuster Code dann den Dienst angreifen könnte.
+- **Menge:** Rund 33 ImageLoad-Ereignisse je Start des Simulators, sonst nur einzelne Ereignisse je Szenario.
+- **Testdaten:** Die Ereignisse enthalten Benutzername, SID und Anmelde-IDs. Fixtures werden vor dem Einchecken anonymisiert.

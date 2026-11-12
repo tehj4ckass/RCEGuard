@@ -16,7 +16,7 @@ started under the name WowGuard.
 
 | Milestone | Content | State |
 | :--- | :--- | :--- |
-| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | written, **not yet verified on a machine with Sysmon** |
+| M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install and all simulator scenarios verified with Sysmon 15.22, `uninstall.ps1` not yet run |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log, toast | open |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, ntfy, heartbeat | open |
@@ -68,9 +68,18 @@ C:\RCEGuardTest\Wow.exe --spawn
 | `--spawn` | starts `cmd.exe /c echo` | id 1, rule `R1` |
 | `--connect [host:port]` | opens a TCP connection (default `1.1.1.1:443`) | id 3, rule `R2` |
 | `--drop` | creates and deletes `%APPDATA%\rceguard-test.exe` | id 11, rule `R3` |
-| `--runkey` | sets and removes an `HKCU\...\Run` value | id 13, rule `R4` |
+| `--runkey` | sets and removes an `HKCU\...\Run` value | id 13 (set) and id 12 (delete), rule `R4` |
 | `--cpu [seconds]` | full load on all cores | none (R8 is polled by the service, M5) |
-| `--miner-args` | starts a child with `stratum+tcp://` in its arguments | id 1, rule `R1` or `R9` |
+| `--miner-args` | starts a child with `stratum+tcp://` in its arguments | id 1, rule `R1` (Sysmon names only the first matching rule) |
+
+Every child process also produces an id 10 event (rule `R7`, the client holds a handle to its
+child) and an id 13 event for a Windows bookkeeping key under `Services\bam`. Both are expected.
+
+Save the recorded events as XML, for example as raw material for test fixtures:
+
+```powershell
+.\scripts\show-events.ps1 -Last 200 -OutFile out\events.xml
+```
 
 To monitor the real client instead, run `install.ps1` again with its path, for example
 `-ClientPath 'D:\Games\Warmane\Wow.exe'`.
