@@ -13,6 +13,13 @@ public sealed record GuardConfig
     /// If false, nothing is terminated: findings that would kill a process are only reported.
     /// </summary>
     public bool KillEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Seconds during which a repeated alert (same rule, client process and target) is only counted
+    /// instead of reported again. 0 reports every occurrence. Findings that terminate a process are
+    /// never held back.
+    /// </summary>
+    public int RepeatWindowSeconds { get; init; } = 300;
 }
 
 /// <summary>One watched game client and the server it is allowed to talk to.</summary>
@@ -82,6 +89,11 @@ public static class GuardConfigJson
         if (config.Profiles is null || config.Profiles.Count == 0)
         {
             throw new FormatException("Configuration has no profiles.");
+        }
+
+        if (config.RepeatWindowSeconds is < 0 or > 86400)
+        {
+            throw new FormatException($"repeatWindowSeconds must be between 0 and 86400, got {config.RepeatWindowSeconds}.");
         }
 
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

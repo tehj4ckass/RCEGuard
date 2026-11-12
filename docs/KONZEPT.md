@@ -253,4 +253,23 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   - *Scheitert der Start bei der Installation*, wird der Dienst wieder entfernt, damit Windows ihn nicht endlos neu
     startet; der Sensor bleibt.
   - *Abnahme:* `acceptance-test.ps1 -InstalledService` prüft Szenarien, Registrierung und den Neustart nach Abbruch.
-- **Offen in M2:** Verfolgung von Enkelprozessen, Entprellen wiederholter Alarme.
+- **Enkelprozesse (12.11.2026): beim Beenden gesucht, nicht fortlaufend verfolgt.** Sysmon meldet nur direkte Kinder des
+  Clients. Läuft das Kind beim Beenden noch, geht sein ganzer Baum mit. Ist es schon beendet (`cmd /c start payload`
+  dauert Millisekunden, der Dienst braucht rund eine Sekunde; der alte Dienst meldete dann nur „already exited“ und ließ
+  das Programm laufen), sucht der Dienst in der Prozessliste von Windows nach laufenden Programmen, die die PID des Kindes
+  als Elternprozess nennen und nach ihm gestartet wurden, und beendet sie samt Baum. Die Startzeit des Kindes kommt aus
+  dem Ereignis (`UtcTime`); ohne sie wird nicht gesucht, weil eine PID allein wiederverwendet sein kann. Gehört die PID
+  inzwischen einem anderen Programm, bleibt alles unberührt, was nach dessen Start entstand.
+  - *Grenzen:* Ein Programm, dessen Elternprozess selbst ein schon beendeter Enkel ist, wird nicht gefunden. Ein
+    gefälschter Elternprozess (PPID-Spoofing) entgeht der Suche und schon der Sysmon-Regel.
+  - *Verworfen für jetzt:* alle Prozessstarts des Rechners in Sysmon aufzeichnen. Das würde die Abstammung lückenlos
+    machen, schriebe aber die Kommandozeilen aller Programme ins Sysmon-Log und widerspräche der Zusage, nur den Client
+    zu beobachten. Das ist eine Entscheidung des Inhabers. Wirklich schließen kann die Lücke nur M3
+    (`DisallowChildProcessCreation`): Dann entsteht das Kind gar nicht erst.
+  - *Test:* Simulator-Szenario `--detach`; `tests/RCEGuard.Service.Tests` prüft den Beender gegen echte Prozesse.
+- **Entprellen (12.11.2026).** Derselbe Alarm (Regel, Schwere, Client-Prozess, Ziel) wird einmal gemeldet und danach für
+  `repeatWindowSeconds` (Standard 300, 0 schaltet ab) nur gezählt; Zähler und letzter Zeitpunkt stehen am Befund in
+  `findings.db` (`repeats`, `last_time_utc`). Nach dem Fenster wird neu gemeldet, mit der Zahl der zurückgehaltenen
+  Wiederholungen. Befunde mit Beenden werden nie zurückgehalten. Ein neuer Start des Clients ist ein neuer Prozess und
+  alarmiert wieder. Gerechnet wird mit der Zeit der Ereignisse, damit ein Replay sich wie der Live-Lauf verhält.
+- **Offen in M2:** Abnahme der beiden Punkte im installierten Dienst; Lesezeichen im Sysmon-Log (siehe oben).

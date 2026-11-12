@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 using RCEGuard.Core.Configuration;
@@ -124,7 +125,9 @@ public sealed class RuleEngine
             var targets = new List<KillTarget>();
             if (pid is { } childPid)
             {
-                targets.Add(new KillTarget(childPid, image, IncludeDescendants: true));
+                // With the start time the service can also catch what the child leaves behind if it exits
+                // before the guard reacts ("cmd /c start payload"): Sysmon only reports direct children.
+                targets.Add(new KillTarget(childPid, image, IncludeDescendants: true, StartedAt: ProcessStart(e)));
             }
 
             if (e.GetInt("ParentProcessId") is { } parentPid)
@@ -173,6 +176,17 @@ public sealed class RuleEngine
 
         return findings;
     }
+
+    /// <summary>Creation time of the process a ProcessCreate event is about (field UtcTime, else the event time).</summary>
+    private static DateTimeOffset ProcessStart(SysmonEvent e) =>
+        DateTimeOffset.TryParseExact(
+            e.Get("UtcTime"),
+            "yyyy-MM-dd HH:mm:ss.fff",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var created)
+            ? created
+            : e.TimeCreated;
 
     private bool IsConsoleHostStartedByWindows(string image, string commandLine) =>
         PathRules.Same(image, consoleHostImage) && consoleHostCommandLine.IsMatch(commandLine);

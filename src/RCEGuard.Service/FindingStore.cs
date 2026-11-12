@@ -37,10 +37,45 @@ public sealed class FindingStore : IDisposable
             CREATE INDEX IF NOT EXISTS ix_findings_time ON findings (time_utc);
             """;
         command.ExecuteNonQuery();
+
+        // Added later: how often the finding repeated within the repeat window, and when last.
+        AddColumnIfMissing("repeats", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("last_time_utc", "TEXT");
+    }
+
+    private void AddColumnIfMissing(string name, string definition)
+    {
+        using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT COUNT(*) FROM pragma_table_info('findings') WHERE name = $name;";
+        probe.Parameters.AddWithValue("$name", name);
+        if (Convert.ToInt64(probe.ExecuteScalar(), CultureInfo.InvariantCulture) > 0)
+        {
+            return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE findings ADD COLUMN {name} {definition};";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>Counts one repeat of a finding that was stored earlier.</summary>
+    /// <param name="rowId">Row id returned by <see cref="Add"/>.</param>
+    /// <param name="time">Time of the repeated event.</param>
+    public void AddRepeat(long rowId, DateTimeOffset time)
+    {
+        lock (gate)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE findings SET repeats = repeats + 1, last_time_utc = $time WHERE id = $id;";
+            command.Parameters.AddWithValue("$time", time.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$id", rowId);
+            command.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Stores one finding together with a description of the action that was taken.</summary>
-    public void Add(Finding finding, string actionTaken)
+    /// <returns>The row id of the stored finding.</returns>
+    public long Add(Finding finding, string actionTaken)
     {
         lock (gate)
         {
@@ -63,6 +98,10 @@ public sealed class FindingStore : IDisposable
             command.Parameters.AddWithValue("$summary", finding.Summary);
             command.Parameters.AddWithValue("$recordId", finding.RecordId);
             command.ExecuteNonQuery();
+
+            using var id = connection.CreateCommand();
+            id.CommandText = "SELECT last_insert_rowid();";
+            return Convert.ToInt64(id.ExecuteScalar(), CultureInfo.InvariantCulture);
         }
     }
 

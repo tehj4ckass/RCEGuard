@@ -21,6 +21,7 @@ public sealed class GuardWorker : BackgroundService
     private readonly ILogger<GuardWorker> logger;
     private readonly IHostApplicationLifetime lifetime;
     private readonly Channel<string> events = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+    private FindingDebouncer debouncer = new(TimeSpan.Zero);
 
     /// <summary>Creates the worker.</summary>
     public GuardWorker(ServiceOptions options, ILogger<GuardWorker> logger, IHostApplicationLifetime lifetime)
@@ -69,6 +70,7 @@ public sealed class GuardWorker : BackgroundService
         var killEnabled = config.KillEnabled && !options.DryRun && options.ReplayPath is null;
         var engine = new RuleEngine(config, Environment.SystemDirectory);
         var killer = new ProcessKiller(dryRun: !killEnabled);
+        debouncer = new FindingDebouncer(TimeSpan.FromSeconds(config.RepeatWindowSeconds));
         using var store = new FindingStore(Path.Combine(options.DataDirectory, "findings.db"));
 
         foreach (var profile in config.Profiles)
@@ -169,6 +171,14 @@ public sealed class GuardWorker : BackgroundService
 
         foreach (var finding in engine.Evaluate(sysmonEvent!))
         {
+            // The same alert again within the repeat window is counted on the stored finding, not reported anew.
+            var decision = debouncer.Check(finding);
+            if (!decision.Report)
+            {
+                store.AddRepeat(decision.Entry!.Tag, finding.Time);
+                continue;
+            }
+
             var taken = "none";
             if (finding.Action == FindingAction.Kill)
             {
@@ -177,8 +187,15 @@ public sealed class GuardWorker : BackgroundService
                     : string.Join("; ", finding.KillTargets.Select(killer.Kill));
             }
 
-            store.Add(finding, taken);
+            var rowId = store.Add(finding, taken);
+            if (decision.Entry is { } entry)
+            {
+                entry.Tag = rowId;
+            }
 
+            var repeats = decision.RepeatsBefore > 0
+                ? $" | seen {decision.RepeatsBefore} more time(s) since the previous report"
+                : string.Empty;
             var delayMs = (long)(DateTimeOffset.UtcNow - finding.Time).TotalMilliseconds;
             var level = finding.Severity switch
             {
@@ -188,8 +205,8 @@ public sealed class GuardWorker : BackgroundService
             };
             logger.Log(
                 level,
-                "{Rule} {Severity} [{Profile}] {Summary} | action: {Action} -> {Taken} | {Delay} ms after the event",
-                finding.RuleId, finding.Severity.ToString().ToUpperInvariant(), finding.Profile, finding.Summary, finding.Action, taken, delayMs);
+                "{Rule} {Severity} [{Profile}] {Summary} | action: {Action} -> {Taken} | {Delay} ms after the event{Repeats}",
+                finding.RuleId, finding.Severity.ToString().ToUpperInvariant(), finding.Profile, finding.Summary, finding.Action, taken, delayMs, repeats);
         }
     }
 

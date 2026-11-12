@@ -49,8 +49,116 @@ public sealed class ProcessKiller
     /// <summary>Creates a killer; with <paramref name="dryRun"/> nothing is terminated.</summary>
     public ProcessKiller(bool dryRun) => this.dryRun = dryRun;
 
-    /// <summary>Terminates one target and, if requested, everything it started.</summary>
+    /// <summary>
+    /// Terminates one target and, if requested, everything it started. If the target has already
+    /// exited (or its pid belongs to another program by now) and its start time is known, the
+    /// programs it left behind are terminated as well.
+    /// </summary>
     public KillResult Kill(KillTarget target)
+    {
+        var result = KillProcess(target);
+        if (!target.IncludeDescendants || target.StartedAt is not { } startedAt
+            || result.Outcome is not (KillOutcome.AlreadyExited or KillOutcome.ImageMismatch))
+        {
+            return result;
+        }
+
+        // A running target was terminated together with its tree. Only a target that is gone can
+        // have left something behind that no longer hangs below a running process.
+        DateTimeOffset? reusedSince = null;
+        if (result.Outcome == KillOutcome.ImageMismatch)
+        {
+            reusedSince = StartTimeOf(target.ProcessId);
+            if (reusedSince is null)
+            {
+                return result; // Cannot tell the children of the old process from those of the new one.
+            }
+        }
+
+        var leftBehind = KillLeftBehind(target.ProcessId, startedAt, reusedSince);
+        return leftBehind.Count == 0
+            ? result
+            : result with { Message = $"{result.Message}, left behind: {string.Join(", ", leftBehind)}" };
+    }
+
+    /// <summary>
+    /// Terminates the running programs a process that is gone left behind: their parent pid is the
+    /// pid of that process and they were started after it. If the pid has been reused since, programs
+    /// started after the new owner are its children and are left alone.
+    /// </summary>
+    private List<string> KillLeftBehind(int parentPid, DateTimeOffset parentStartedAt, DateTimeOffset? reusedSince)
+    {
+        var report = new List<string>();
+        IReadOnlyList<ProcessEntry> snapshot;
+        try
+        {
+            snapshot = ProcessSnapshot.Take();
+        }
+        catch (Win32Exception ex)
+        {
+            report.Add($"process list could not be read: {ex.Message}");
+            return report;
+        }
+
+        foreach (var entry in snapshot)
+        {
+            if (entry.ParentProcessId != parentPid || entry.ProcessId <= 4 || entry.ProcessId == Environment.ProcessId)
+            {
+                continue;
+            }
+
+            var label = $"{entry.Name} ({entry.ProcessId})";
+            try
+            {
+                // The Process object holds a handle from here on, so the pid cannot change owners in between.
+                using var process = Process.GetProcessById(entry.ProcessId);
+                var started = new DateTimeOffset(process.StartTime);
+                if (started < parentStartedAt || (reusedSince is { } reused && started >= reused))
+                {
+                    continue; // Not a child of the process the finding is about.
+                }
+
+                if (process.HasExited)
+                {
+                    continue;
+                }
+
+                if (dryRun)
+                {
+                    report.Add($"{label} would be terminated (dry run)");
+                    continue;
+                }
+
+                process.Kill(entireProcessTree: true);
+                report.Add($"{label} terminated");
+            }
+            catch (ArgumentException)
+            {
+                // Exited in the meantime.
+            }
+            catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or AggregateException)
+            {
+                report.Add($"{label} could not be terminated: {ex.Message}");
+            }
+        }
+
+        return report;
+    }
+
+    private static DateTimeOffset? StartTimeOf(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return new DateTimeOffset(process.StartTime);
+        }
+        catch (Exception ex) when (ex is ArgumentException or Win32Exception or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private KillResult KillProcess(KillTarget target)
     {
         if (target.ProcessId <= 4 || target.ProcessId == Environment.ProcessId)
         {

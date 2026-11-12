@@ -78,6 +78,31 @@ public class ConsoleHostTests
     }
 
     [Fact]
+    public void The_child_is_named_with_its_start_time_so_what_it_leaves_behind_can_be_found()
+    {
+        // Recorded event: UtcTime 2026-11-12 14:04:58.424.
+        var finding = Assert.Single(TestData.Engine().Evaluate(TestData.Fixture("r1-child-process")));
+
+        var child = finding.KillTargets[0];
+        var client = finding.KillTargets[1];
+        Assert.Equal(33884, child.ProcessId);
+        Assert.Equal(new DateTimeOffset(2026, 11, 12, 14, 4, 58, 424, TimeSpan.Zero), child.StartedAt);
+        Assert.True(child.IncludeDescendants);
+        Assert.Equal(TestData.ClientPid, client.ProcessId);
+        Assert.Null(client.StartedAt); // the client is running; its tree is terminated from the top
+    }
+
+    [Fact]
+    public void Without_a_readable_UtcTime_the_time_of_the_event_is_used()
+    {
+        var e = ChildStart(@"C:\Windows\System32\cmd.exe", "cmd.exe /c whoami");
+
+        var child = Assert.Single(TestData.Engine().Evaluate(e)).KillTargets[0];
+
+        Assert.Equal(e.TimeCreated, child.StartedAt);
+    }
+
+    [Fact]
     public void The_system_directory_of_the_machine_decides_where_the_console_host_lives()
     {
         var engine = new RuleEngine(new() { Profiles = [TestData.Profile()] }, @"D:\Win\System32\");

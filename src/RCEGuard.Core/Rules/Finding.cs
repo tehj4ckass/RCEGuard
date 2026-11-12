@@ -33,7 +33,12 @@ public enum FindingAction
 /// <param name="ProcessId">Process id from the event.</param>
 /// <param name="Image">Full image path from the event; the service only kills if the pid still runs this image.</param>
 /// <param name="IncludeDescendants">Also terminate everything the process started.</param>
-public sealed record KillTarget(int ProcessId, string Image, bool IncludeDescendants);
+/// <param name="StartedAt">
+/// When the process was created, if the event says so. With it the service can also find what the
+/// process left behind after it exited: running programs that name this pid as their parent and
+/// were started after this time. Without it nothing is searched, because a pid alone can be reused.
+/// </param>
+public sealed record KillTarget(int ProcessId, string Image, bool IncludeDescendants, DateTimeOffset? StartedAt = null);
 
 /// <summary>The result of a rule that matched an event.</summary>
 public sealed record Finding

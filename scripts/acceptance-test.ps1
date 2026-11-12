@@ -119,10 +119,18 @@ $serviceLog = if ($InstalledService) { $GuardLog } else { Join-Path $OutDir 'm2-
 $scenarios = @(
     [pscustomobject]@{ Name = 'spawn';      Arguments = @('--spawn');                  Rules = @('R1');       MustDie = $true }
     [pscustomobject]@{ Name = 'miner-args'; Arguments = @('--miner-args');             Rules = @('R1', 'R9'); MustDie = $true }
+    [pscustomobject]@{ Name = 'detach';     Arguments = @('--detach');                 Rules = @('R1');       MustDie = $true }
     [pscustomobject]@{ Name = 'runkey';     Arguments = @('--runkey');                 Rules = @('R4');       MustDie = $true }
     [pscustomobject]@{ Name = 'connect';    Arguments = @('--connect', '1.1.1.1:443'); Rules = @('R2');       MustDie = $false }
     [pscustomobject]@{ Name = 'drop';       Arguments = @('--drop');                   Rules = @('R3');       MustDie = $false }
 )
+
+# The program the --detach scenario leaves behind carries this text on its command line.
+$detachMarker = 'rceguard-detached-test'
+function Get-LeftBehind {
+    @(Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%$detachMarker%'" |
+        Where-Object { $_.ProcessId -ne $PID })
+}
 
 function Read-LogLines([long] $offset = 0) {
     # The guard still has the file open for writing.
@@ -225,6 +233,13 @@ try {
             $missing = @($scenario.Rules | Where-Object { $_ -notin $foundRules })
         } while ($missing.Count -gt 0 -and (Get-Date) -lt $settle)
 
+        # --detach: the child has exited by the time the guard reacts; what it started must be gone as well.
+        $leftBehind = @(Get-LeftBehind)
+        if ($leftBehind.Count -gt 0) {
+            $outcome += ', left a program running'
+            foreach ($survivor in $leftBehind) { & taskkill.exe /PID $survivor.ProcessId /T /F 2>&1 | Out-Null }
+        }
+
         $relevant = @($found | Where-Object { $_.Rule -in $scenario.Rules })
         $maxDelay = if ($relevant.Count -gt 0) { [int] ($relevant | Measure-Object DelayMs -Maximum).Maximum } else { $null }
         $detected = $missing.Count -eq 0
@@ -243,8 +258,12 @@ try {
     # --- 3. The installed service itself --------------------------------------------------------
     if ($InstalledService) {
         $registered = Get-GuardService
-        if ($null -eq $registered) {
-            $checks += [pscustomobject]@{ Check = 'service is registered'; Value = 'no such service'; Result = $(if ($AllowNonAdmin) { 'SKIP' } else { 'FAIL' }) }
+        if (-not $isAdmin) {
+            # Trying the script with a stand-in guard: the checks below would be about the real service.
+            $checks += [pscustomobject]@{ Check = 'service checks'; Value = 'not run without administrator rights'; Result = 'SKIP' }
+        }
+        elseif ($null -eq $registered) {
+            $checks += [pscustomobject]@{ Check = 'service is registered'; Value = 'no such service'; Result = 'FAIL' }
         }
         else {
             $binary = Get-GuardServiceBinary $registered
@@ -285,6 +304,7 @@ finally {
         & taskkill.exe /PID $service.Id /T /F 2>&1 | Out-Null
         $null = $service.WaitForExit(5000)
     }
+    foreach ($survivor in @(Get-LeftBehind)) { & taskkill.exe /PID $survivor.ProcessId /T /F 2>&1 | Out-Null }
     Remove-Item -LiteralPath $scenarioOut -Force -ErrorAction SilentlyContinue
 
     # If the guard terminated the client in the middle of --runkey or --drop, the test artefacts are still there.

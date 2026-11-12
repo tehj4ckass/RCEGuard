@@ -14,6 +14,7 @@ internal static class Program
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "RCEGuardTest";
     private const string DropFileName = "rceguard-test.exe";
+    private const string DetachMarker = "rceguard-detached-test";
 
     /// <summary>Seconds to stay alive after the scenario (--hold), so a guard has time to terminate this process.</summary>
     private static int holdSeconds;
@@ -74,6 +75,9 @@ internal static class Program
                 case "--miner-args":
                     MinerArgs();
                     break;
+                case "--detach":
+                    Detach();
+                    break;
                 default:
                     Console.Error.WriteLine($"Unknown scenario '{args[0]}'.");
                     PrintUsage();
@@ -102,9 +106,12 @@ internal static class Program
               --runkey                set and remove an HKCU Run value    -> R4 autostart key
               --cpu [seconds]         full load on all cores (300 s)      -> R8 background CPU
               --miner-args            child with 'stratum+tcp://' argument -> R9 miner command line
+              --detach                child that leaves a waiting program behind and exits
+                                      (runs on for about 5 s)             -> R1, left-behind program
 
             Add '--hold [seconds]' (default 15) after a scenario to keep this process, and for
-            --spawn also its child, running: a guard then has something left to terminate.
+            --spawn its child and for --detach the left-behind program, running: a guard then has
+            something left to terminate.
             Exit codes: 0 scenario done, 1 scenario blocked, 3 held and not terminated.
             """);
     }
@@ -127,6 +134,16 @@ internal static class Program
     {
         Console.WriteLine("R9: starting a child process with a miner-like command line.");
         RunChild("/c echo stratum+tcp://rceguard-test.invalid:3333 --donate-level 1");
+    }
+
+    private static void Detach()
+    {
+        // The child starts a second program and exits at once. That program keeps running without a
+        // living parent, which is how "cmd /c start payload" gets out from under the client.
+        // It only waits (ping to this machine) and ends by itself; the "rem" text marks it for the test.
+        var seconds = holdSeconds > 0 ? holdSeconds + 20 : 5;
+        Console.WriteLine($"R1: starting a child that leaves a program behind for about {seconds} s and exits.");
+        RunChild($"/c start \"\" /b cmd.exe /c \"ping -n {seconds + 1} 127.0.0.1 > nul & rem {DetachMarker}\"");
     }
 
     private static void RunChild(string arguments)

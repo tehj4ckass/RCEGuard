@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks and the restart by Windows after the service process was ended. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. Grandchildren of the client are not tracked yet; toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all five simulator scenarios detected within 0.7–1.1 s, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks and the restart by Windows after the service process was ended. **Not yet verified:** start after a reboot, removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. Terminating what an exited child left behind and counting repeated alerts are built and tested against real processes, **but not yet run in the installed service**. Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -74,6 +74,7 @@ C:\RCEGuardTest\Wow.exe --spawn
 | `--runkey` | sets and removes an `HKCU\...\Run` value | id 13 (set) and id 12 (delete), rule `R4` |
 | `--cpu [seconds]` | full load on all cores | none (R8 is polled by the service, M5) |
 | `--miner-args` | starts a child with `stratum+tcp://` in its arguments | id 1, rule `R1` (Sysmon names only the first matching rule) |
+| `--detach` | starts a child that starts a waiting program and exits at once; the program runs on for about 5 s | id 1, rule `R1` for the child only (Sysmon does not report what the child starts) |
 
 Every child process also produces an id 10 event (rule `R7`, the client holds a handle to its
 child) and an id 13 event for a Windows bookkeeping key under `Services\bam`. Both are expected.
@@ -134,11 +135,13 @@ Windows service is running: two guards would both act on every event):
 
 Without `appsettings.json` the client the sensor was installed for is the only profile, with an
 empty allowlist: every connection of the client is then an R2 alert. A configuration looks like
-this (`killOnUnknownRemote` and `killEnabled` are optional):
+this (`killOnUnknownRemote`, `killEnabled` and `repeatWindowSeconds` are optional; the values
+shown for the last two are the defaults):
 
 ```json
 {
   "killEnabled": true,
+  "repeatWindowSeconds": 300,
   "profiles": [
     {
       "name": "Warmane",
@@ -172,6 +175,18 @@ What the rules do:
 A process is only terminated if its pid still runs the program the event named. Findings go to
 `findings.db` (SQLite) in the data folder. "Alert" currently means a line in the console; the
 notification itself comes with the tray app in M4, because a service cannot show toasts.
+
+**What a child leaves behind.** Sysmon only reports the programs the client starts itself, not
+what those start. When the guard terminates a child that is still running, everything below it
+goes with it. If the child has already exited by then (`cmd /c start payload` takes
+milliseconds, the guard about a second), the guard looks for running programs that name the
+child as their parent and were started after it, and terminates them with everything below
+them. Limits: a program that was started by such a left-behind program which has itself exited
+is not found, and neither is one whose parent was forged.
+
+**Repeated alerts.** The same alert (same rule, client process and target) is reported once
+and then only counted for `repeatWindowSeconds`; the count is stored with the finding. Findings
+that terminate a process are never held back.
 
 The console host is only recognised in its exact form: `conhost.exe` from the Windows system
 folder, started with nothing but a console handle on its command line. Windows starts it that way
@@ -264,7 +279,8 @@ looks like a coin miner:
 Differences to the concept, on purpose: the game folder itself is not treated as safe for R3,
 only the data folders `Cache`, `WTF`, `Logs`, `Interface`, `Screenshots` and `Errors`. A DLL
 dropped next to the client would otherwise go unnoticed. Sysmon can only filter on the direct
-parent, so grandchildren of the client have to be tracked by the service (M2).
+parent, so it does not record what the children of the client start; the service finds those
+programs itself when it terminates a child (see "What a child leaves behind").
 
 ## Repository layout
 
@@ -282,6 +298,7 @@ src/RCEGuard.Core/                     rule engine, event parser, configuration 
 src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
 tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
+tests/RCEGuard.Service.Tests/          tests of the process killer against real, harmless processes
 build.ps1                              build wrapper that insists on a real .NET SDK; -Publish for the service
 ```
 

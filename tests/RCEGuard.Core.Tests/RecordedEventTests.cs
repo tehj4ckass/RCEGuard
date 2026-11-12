@@ -46,7 +46,10 @@ public class RecordedEventTests
         Assert.Equal(TestData.ClientPid, finding.ProcessId);
         Assert.Equal(@"C:\Windows\System32\cmd.exe", finding.Target);
         Assert.Equal(
-            [new KillTarget(33884, @"C:\Windows\System32\cmd.exe", true), new KillTarget(TestData.ClientPid, TestData.Client, true)],
+            [
+                new KillTarget(33884, @"C:\Windows\System32\cmd.exe", true, new DateTimeOffset(2026, 11, 12, 14, 4, 58, 424, TimeSpan.Zero)),
+                new KillTarget(TestData.ClientPid, TestData.Client, true),
+            ],
             finding.KillTargets);
     }
 
