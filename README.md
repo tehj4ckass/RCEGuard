@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. **Not yet verified:** removing the service with `uninstall.ps1`, and the cleanup when the service cannot start. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. `uninstall.ps1` ran with the service installed on 2026-11-13: service, Program Files folder, data folder, Sysmon with its driver and its event publisher were gone afterwards. Three things stayed: the file of Sysmon's event log, the note that the Sysinternals licence was accepted, and two registrations of the service as a source of the Windows Application log. The script now removes them too; **that part has only run against stand-ins, not as administrator**. **Not yet verified:** the cleanup when the service cannot start, and the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -116,6 +116,9 @@ Windows service `RCEGuard`:
 - it only ever starts from Program Files, where a normal user cannot change its files;
 - it writes its log to `C:\ProgramData\RCEGuard\guard.log` and its findings to `findings.db` in
   the same folder. Normal users can read that folder but not write to it;
+- its warnings and findings also go to the Windows Application log (source `RCEGuard.Service`;
+  starts and stops of the service under source `RCEGuard`). That comes with the .NET service
+  host and was not a decision; whether it stays is open. Every local user can read that log;
 - it notes the last event it handled in `sysmon-position.json` there and, when it starts again,
   first reads what Sysmon recorded in the meantime (see "After a restart").
 
@@ -282,6 +285,16 @@ Remove everything again:
 .\scripts\uninstall.ps1
 ```
 
+This removes the service with its folder in Program Files and its registrations as a source of
+the Application log, uninstalls Sysmon if RCEGuard installed it, and deletes the data folder
+(log, findings, configuration). `sysmon -u` itself leaves two things behind, which the script
+removes if this installation brought them: the file of Sysmon's event log with everything it
+recorded (`C:\Windows\System32\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx`) and the
+note in the registry of the installing user that the Sysinternals licence was accepted. With
+`-KeepData` the data folder and that log file stay. **What stays in any case:** the entries the
+service wrote to the Windows Application log; Windows keeps that log, and single entries cannot
+be taken out of it.
+
 ## If Sysmon is already installed
 
 Sysmon has a single configuration per machine. `install.ps1` stops if it finds a Sysmon that
@@ -334,7 +347,7 @@ docs/KONZEPT.md                        concept and milestones (German)
 sysmon/rceguard-sysmon.template.xml    Sysmon configuration template
 scripts/render-config.ps1              renders the template for one client (no admin)
 scripts/install.ps1                    installs Sysmon / loads the configuration (admin)
-scripts/uninstall.ps1                  removes the sensor again (admin)
+scripts/uninstall.ps1                  removes service and sensor again (admin)
 scripts/SysmonTools.ps1                shared Sysmon helpers of the two scripts above
 scripts/GuardServiceTools.ps1          shared helpers for the RCEGuard Windows service
 scripts/show-events.ps1                prints or saves recorded events (admin)

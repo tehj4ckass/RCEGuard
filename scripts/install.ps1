@@ -104,6 +104,10 @@ $state = if (Test-Path -LiteralPath $statePath) {
 $installed = Get-InstalledSysmon
 $sysmonInstalledByRceGuard = $false
 $replacedForeignConfig = $false
+# What 'sysmon -u' will leave behind later. uninstall.ps1 removes it only if this installation brought it.
+$sysmonLogFileCreated = $false
+$sysmonEulaKeyCreated = $false
+$installedBySid = ''
 
 if ($null -ne $installed) {
     $ours = $null -ne $state -and $state.sysmonInstalledByRceGuard
@@ -121,6 +125,11 @@ Merge '$configPath' into your own configuration, or run again with -ReplaceExist
         $replacedForeignConfig = $true
     }
     $sysmonInstalledByRceGuard = $ours
+    if ($ours) {
+        $sysmonLogFileCreated = [bool] (Get-StateValue $state 'sysmonLogFileCreated')
+        $sysmonEulaKeyCreated = [bool] (Get-StateValue $state 'sysmonEulaKeyCreated')
+        $installedBySid = [string] (Get-StateValue $state 'installedBySid' '')
+    }
     Invoke-Sysmon $installed.Exe @('-c', $configPath) | Out-Null
     Write-Host "Sysmon configuration updated (service '$($installed.ServiceName)')."
 }
@@ -135,6 +144,8 @@ else {
         throw "Sysmon is not installed. Pass -SysmonPath <Sysmon64.exe> or -DownloadSysmon (downloads $sysmonUrl)."
     }
 
+    $logFileBefore = Test-Path -LiteralPath $script:SysmonLogFile
+    $eulaKeyBefore = Test-Path -LiteralPath $script:SysmonEulaKey
     $tempDir = $null
     try {
         if ($DownloadSysmon) {
@@ -153,7 +164,8 @@ else {
         Install-SysmonWithRetry $SysmonPath $configPath
     }
     catch {
-        # Nothing was installed: do not leave the data folder of a sensor that does not exist.
+        # Nothing was installed: do not leave what the attempt wrote, nor the data folder of a sensor that does not exist.
+        foreach ($problem in @(Remove-SysmonTraces (-not $logFileBefore) (-not $eulaKeyBefore))) { Write-Warning $problem }
         if (-not (Test-Path -LiteralPath $statePath)) {
             Remove-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
             if (@(Get-ChildItem -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
@@ -171,6 +183,10 @@ else {
     $installed = Get-InstalledSysmon
     if ($null -eq $installed) { throw 'Sysmon reported success, but its service was not found afterwards.' }
     $sysmonInstalledByRceGuard = $true
+    $sysmonLogFileCreated = -not $logFileBefore
+    $sysmonEulaKeyCreated = -not $eulaKeyBefore
+    # The licence note lies in the registry of the user who runs this script; only that user's uninstall removes it.
+    $installedBySid = Get-CurrentUserSid
     Write-Host "Sysmon installed (service '$($installed.ServiceName)')."
 }
 
@@ -183,6 +199,9 @@ function Write-InstallState([bool] $serviceInstalled) {
         sysmonServiceName         = $installed.ServiceName
         sysmonExe                 = $installed.Exe
         sysmonInstalledByRceGuard = [bool] $sysmonInstalledByRceGuard
+        sysmonLogFileCreated      = [bool] $sysmonLogFileCreated
+        sysmonEulaKeyCreated      = [bool] $sysmonEulaKeyCreated
+        installedBySid            = [string] $installedBySid
         replacedForeignConfig     = $replaced
         serviceInstalled          = $serviceInstalled
         updatedUtc                = (Get-Date).ToUniversalTime().ToString('o')

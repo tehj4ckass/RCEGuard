@@ -130,11 +130,29 @@ function Restart-GuardService([string] $dataDir) {
     Start-GuardService $dataDir
 }
 
+# The running service registers itself as a source of the Windows Application log (the .NET service
+# host does that): one name for "service started/stopped", one for its warnings and findings.
+$script:GuardEventLogRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application'
+$script:GuardEventSources = @('RCEGuard', 'RCEGuard.Service')
+
+function Remove-GuardEventSources {
+    # Returns $true if a registration was removed. The entries already in the Application log stay; Windows keeps them.
+    $removed = $false
+    foreach ($source in $script:GuardEventSources) {
+        $key = Join-Path $script:GuardEventLogRoot $source
+        if (Test-Path -LiteralPath $key) {
+            Remove-Item -LiteralPath $key -Recurse -Force
+            $removed = $true
+        }
+    }
+    return $removed
+}
+
 function Uninstall-GuardService {
     <#
-        Stops and removes the service and its folder in Program Files.
-        Returns $true if there was something to remove. A service of that name that RCEGuard did
-        not install is left alone.
+        Stops and removes the service, its folder in Program Files and its registrations as an
+        event source. Returns $true if there was something to remove. A service of that name that
+        RCEGuard did not install is left alone.
     #>
     $removed = $false
     $existing = Get-GuardService
@@ -153,5 +171,6 @@ function Uninstall-GuardService {
         Remove-Item -LiteralPath $script:GuardInstallDir -Recurse -Force
         $removed = $true
     }
+    if (Remove-GuardEventSources) { $removed = $true }
     return $removed
 }

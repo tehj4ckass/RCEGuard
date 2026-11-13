@@ -4,16 +4,21 @@
     Removes RCEGuard again: the guard service and the sensor.
 
 .DESCRIPTION
-    First stops and removes the Windows service 'RCEGuard' and C:\Program Files\RCEGuard.
+    First stops and removes the Windows service 'RCEGuard', C:\Program Files\RCEGuard and the
+    registrations of the service as a source of the Windows Application log.
     Then uses C:\ProgramData\RCEGuard\install-state.json written by install.ps1:
-      - Sysmon is uninstalled only if RCEGuard installed it.
+      - Sysmon is uninstalled only if RCEGuard installed it. What Sysmon leaves behind then goes
+        too, if the installation brought it: the file of its event log (everything it recorded)
+        and the note in the registry that the Sysinternals licence was accepted.
       - If RCEGuard replaced the rules of a Sysmon that was already there, Sysmon stays
         installed and is reset to its default rules; the earlier rules were dumped to
         C:\ProgramData\RCEGuard\sysmon-rules-before-rceguard-*.txt and must be reloaded by hand.
     The data folder is removed unless -KeepData is given or such a dump exists.
+    What the service wrote to the Windows Application log stays there; Windows keeps that log.
 
 .PARAMETER KeepData
-    Keeps C:\ProgramData\RCEGuard (configuration, findings database, log, dumps).
+    Keeps C:\ProgramData\RCEGuard (configuration, findings database, log, dumps) and the file of
+    Sysmon's event log.
 #>
 [CmdletBinding()]
 param(
@@ -62,6 +67,22 @@ elseif ($state.sysmonInstalledByRceGuard) {
         Remove-Item -LiteralPath $sysmonExe -Force
     }
     Write-Host 'Sysmon uninstalled.'
+
+    # 'sysmon -u' also leaves the file of its event log and the licence note. They go if this
+    # installation brought them; what was there before belongs to someone else.
+    $logIsOurs = [bool] (Get-StateValue $state 'sysmonLogFileCreated')
+    $eulaIsOurs = [bool] (Get-StateValue $state 'sysmonEulaKeyCreated')
+    $sameUser = [string] (Get-StateValue $state 'installedBySid' '') -eq (Get-CurrentUserSid)
+    foreach ($problem in @(Remove-SysmonTraces ($logIsOurs -and -not $KeepData) ($eulaIsOurs -and $sameUser))) { Write-Warning $problem }
+    if ($logIsOurs -and $KeepData -and (Test-Path -LiteralPath $script:SysmonLogFile)) {
+        Write-Host "Kept the event log file of Sysmon: '$script:SysmonLogFile'."
+    }
+    elseif ($logIsOurs -and -not (Test-Path -LiteralPath $script:SysmonLogFile)) {
+        Write-Host 'Removed the event log file of Sysmon.'
+    }
+    if ($eulaIsOurs -and -not $sameUser) {
+        Write-Warning "The note that the Sysinternals licence was accepted is in the registry of the user who installed RCEGuard ('$script:SysmonEulaKey' of that user). It stays; that user can delete the key."
+    }
 }
 else {
     Invoke-Sysmon $sysmonExe @('-c', '--') 'Resetting the Sysmon configuration' | Out-Null

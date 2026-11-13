@@ -3,6 +3,46 @@
 # Registration of Sysmon's event publisher. 'sysmon -i' writes it, 'sysmon -u' removes it.
 $script:SysmonPublisherKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{5770385f-c22a-43e0-bf4c-06f5698ffbd9}'
 
+# What 'sysmon -u' leaves on the machine (seen with Sysmon 15.22 on 2026-11-13): the file of its
+# event log, with everything it recorded, and the note that the licence was accepted.
+$script:SysmonLogFile = Join-Path $env:windir 'System32\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx'
+$script:SysmonEulaKey = 'HKCU:\Software\Sysinternals\System Monitor'
+
+function Get-StateValue($state, [string] $name, $default = $false) {
+    # A state file written by an earlier version of install.ps1 does not have every value.
+    if ($null -ne $state -and $state.PSObject.Properties.Name -contains $name) { return $state.$name }
+    return $default
+}
+
+function Get-CurrentUserSid {
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+
+function Remove-SysmonTraces([bool] $logFile, [bool] $eulaKey) {
+    <#
+        Removes what 'sysmon -u' leaves behind, as far as the caller says it is RCEGuard's to remove.
+        Never throws: returns one line for everything that could not be removed.
+    #>
+    $problems = @()
+    if ($logFile -and (Test-Path -LiteralPath $script:SysmonLogFile)) {
+        try { Remove-Item -LiteralPath $script:SysmonLogFile -Force -ErrorAction Stop }
+        catch { $problems += "The event log file of Sysmon, '$script:SysmonLogFile', could not be removed: $($_.Exception.Message) Delete it by hand after restarting Windows." }
+    }
+    if ($eulaKey -and (Test-Path -LiteralPath $script:SysmonEulaKey)) {
+        try {
+            Remove-Item -LiteralPath $script:SysmonEulaKey -Recurse -Force -ErrorAction Stop
+            # The key above is shared by all Sysinternals tools: it only goes if nothing else is in it.
+            $parent = Split-Path -Path $script:SysmonEulaKey -Parent
+            $parentKey = Get-Item -LiteralPath $parent -ErrorAction SilentlyContinue
+            if ($null -ne $parentKey -and $parentKey.SubKeyCount -eq 0 -and $parentKey.ValueCount -eq 0) {
+                Remove-Item -LiteralPath $parent -Force -ErrorAction Stop
+            }
+        }
+        catch { $problems += "The note that the Sysinternals licence was accepted, '$script:SysmonEulaKey', could not be removed: $($_.Exception.Message)" }
+    }
+    return $problems
+}
+
 function Invoke-SysmonRaw([string] $exe, [string[]] $arguments) {
     # Windows PowerShell 5.1 turns redirected stderr lines into terminating errors under 'Stop'.
     $ErrorActionPreference = 'Continue'

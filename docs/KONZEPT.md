@@ -386,6 +386,40 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   Der Schnellstart von Windows ist auf dem Testrechner eingeschaltet; ob der Dienst nach einem Aufwachen aus dem
   Ruhezustand (Herunterfahren mit Schnellstart, Energiesparen) weiter Ereignisse bekommt, ist damit nicht geprüft:
   Die Prozessstartzeit zeigt, dass der Dienst am 13.11. neu gestartet und nicht aufgeweckt wurde.
-- **Offen in M2:** Entfernen mit `uninstall.ps1`; Aufräumen, wenn der Dienst nicht starten kann; Verhalten nach dem
-  Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+- **Entfernen mit `uninstall.ps1` (13.11.2026, erster Lauf mit installiertem Dienst): fast alles weg, drei Reste.**
+  Verglichen wurde ohne Admin-Rechte vor und nach dem Lauf. Weg waren: Dienst `RCEGuard` samt Registry-Eintrag,
+  `C:\Program Files\RCEGuard` (225 Dateien), `C:\ProgramData\RCEGuard`, Dienst `Sysmon64`, Treiber `SysmonDrv`
+  (Registry-Eintrag und `C:\Windows\SysmonDrv.sys`), `C:\Windows\Sysmon64.exe`, Ereignis-Anbieter und -Kanal von
+  Sysmon in der Registry, alle Prozesse. Geblieben sind:
+  - *Die Logdatei von Sysmon* (`…\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx`, 7,2 MB). `sysmon -u`
+    entfernt den Kanal, nicht die Datei; darin steht alles Aufgezeichnete (Befehlszeilen, Benutzername, Ziele).
+    Eine spätere Neuinstallation schreibt in derselben Datei weiter (die Record-IDs liefen am 12.11. über mehrere
+    Installationen durch).
+  - *Der Vermerk über die Sysinternals-Lizenz* (`HKCU\Software\Sysinternals\System Monitor`, `EulaAccepted=1`), den
+    `sysmon -accepteula` in die Registry des installierenden Benutzers schreibt.
+  - *Zwei Ereignisquellen* unter `HKLM\…\Services\EventLog\Application`: `RCEGuard` und `RCEGuard.Service`. Die legt
+    nicht `install.ps1` an, sondern der laufende Dienst: Der .NET-Diensthost (`AddWindowsService`) schreibt Start und
+    Stopp des Dienstes und alle Meldungen ab Warnung ins Windows-Anwendungslog. Das war keine Entscheidung und stand
+    nirgends: Im Anwendungslog dieses Rechners liegen 112 Einträge der Quelle `RCEGuard.Service` (93 Befunde als
+    „Fehler“, 19 Warnungen) und 18 Start-/Stopp-Einträge.
+  - *Umsetzung (Regel: Was `install.ps1` anlegt, entfernt `uninstall.ps1`):* `Uninstall-GuardService` entfernt die
+    beiden Ereignisquellen. `install.ps1` hält in `install-state.json` fest, ob es Logdatei und Lizenzvermerk vor der
+    Installation schon gab (`sysmonLogFileCreated`, `sysmonEulaKeyCreated`) und unter welchem Benutzer installiert
+    wurde (`installedBySid`). `uninstall.ps1` entfernt die Logdatei nur, wenn die Installation sie gebracht hat und
+    `-KeepData` fehlt (wie beim Datenordner), den Lizenzvermerk nur, wenn die Installation ihn gebracht hat und
+    derselbe Benutzer deinstalliert; sonst nennt es den Rest. Lässt sich die Logdatei nicht löschen (noch geöffnet),
+    warnt das Skript und bricht nicht ab. Scheitert schon die Installation von Sysmon, räumt `install.ps1` beides
+    wieder ab. Eine Statusdatei ohne die neuen Werte zählt als „nicht von uns“.
+  - *Was bleibt:* Die Einträge im Anwendungslog selbst lassen sich nicht einzeln löschen.
+  - *Offene Entscheidung des Inhabers:* ob der Dienst weiter ins Anwendungslog schreiben soll. Dafür spricht: Dort
+    suchen Administratoren, und die Einträge überleben das Löschen von `guard.log`. Dagegen: Es war nicht geplant,
+    die Einträge bleiben nach dem Entfernen zurück, und das Anwendungslog kann jeder lokale Benutzer lesen (das gilt
+    für `guard.log` allerdings auch). Bis zur Entscheidung bleibt es an und ist in der README beschrieben.
+  - *Test:* Die neuen Funktionen (`Remove-SysmonTraces`, `Get-StateValue`, `Remove-GuardEventSources`) liefen ohne
+    Admin-Rechte gegen Stellvertreter (Datei im Temp-Ordner, Schlüssel unter `HKCU`) in PowerShell 7 und 5.1, auch mit
+    geöffneter Datei, mit belegtem Nachbarschlüssel und mit einer alten Statusdatei. `install.ps1` und `uninstall.ps1`
+    selbst liefen mit den Änderungen noch nicht.
+- **Offen in M2:** Installieren und Entfernen mit den geänderten Skripten als Administrator (bleibt danach wirklich
+  nichts zurück, lässt sich die Logdatei direkt nach `sysmon -u` löschen?); Aufräumen, wenn der Dienst nicht starten
+  kann; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
