@@ -531,12 +531,28 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     bestätigt: Ein Administrator darf den Schlüssel löschen, und Windows lässt den geschützten Dienst nach dem
     Neustart fallen. Die Ausgabe der beiden Läufe liegt nicht vor; `uninstall.log` ist mit dem Datenordner
     entfernt worden, wie vorgesehen.
-  - *Ein Rest:* Der Registry-Schlüssel `Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational`
-    ist noch da (der Kanal selbst ist weg: `wevtutil gl` kennt ihn nicht). Ob er nach jedem `sysmon -u` bleibt oder
-    nur nach dem abgestürzten, ist offen. `install-test.ps1` protokolliert ihn jetzt (vor dem Test, während der
-    Installation, nach dem Entfernen), zählt ihn aber nicht als Rest; der nächste vollständige Lauf zeigt, was
-    gilt. Bleibt er auch nach einem sauberen `sysmon -u`, muss `uninstall.ps1` ihn entfernen (mit Vermerk in der
-    Statusdatei, ob er vor der Installation schon da war).
-- **Offen in M2:** `install-test.ps1` einmal vollständig (Schritte A bis D), dabei die Frage nach dem
-  Autologger-Schlüssel; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  - *Berichtigung: kein Rest.* Zunächst stand hier, der Registry-Schlüssel
+    `Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational` sei übrig geblieben. Das war ein
+    Fehler der Abfrage, kein Befund: `Test-Path` antwortet ohne Admin-Rechte unterhalb von
+    `HKLM:\SYSTEM\CurrentControlSet\Control\WMI\Autologger` für jeden Namen mit „True“, auch für einen
+    erfundenen (geprüft in PowerShell 7 und 5.1; `reg query` und `OpenSubKey` sagen richtig „nicht da“). An den
+    anderen Stellen, die die Auflistung liest (`Services`, `EventLog\Application`, `WINEVT\Channels` und
+    `Publishers`, `HKCU:\Software\Sysinternals`), antwortet `Test-Path` für einen erfundenen Namen richtig mit
+    „False“. Ob der Schlüssel am 13.11. nach dem Absturz noch da war, lässt sich deshalb nicht mehr sagen.
+    Lehre: Eine Abfrage, die „da“ meldet, einmal mit einem Namen gegenprüfen, den es sicher nicht gibt.
+  - *Vollständiger Lauf von `install-test.ps1` (14.11.2026, 00:24): ALL PASSED, 21 von 21.* Schritt A: Der Build
+    ohne `RCEGuard.Core.dll` wurde nach rund 3 s als Fehlschlag gemeldet („ended right after it was started“:
+    Dienst installiert 00:24:22, abgestürzt 00:24:23, deaktiviert 00:24:25) statt nach 30 s wie am 13.11.
+    Schritt B: Meldung mit dem Grund aus dem Log des Dienstes („not valid JSON“); auch hier meldete Windows
+    „unerwartet beendet, Neustart in 5000 ms“, zwei Sekunden bevor das Skript den Dienst deaktivierte, und nichts
+    kam zurück. Schritt C: Dienst „Running“, Autostart. Schritt D: `uninstall.ps1` ohne Fehler, der Rechner sah
+    aus wie vor dem Test; kein Absturzbericht für Sysmon, Treiber um 00:24:52 entladen.
+  - *Aus dem Lauf:* Der Autologger-Schlüssel war (mit Admin-Rechten gelesen) vor dem Test nicht da, während der
+    Installation da, nach dem Entfernen nicht da: `sysmon -u` räumt ihn ab, `uninstall.ps1` muss nichts tun.
+    `install-test.ps1` zählt ihn jetzt als Teil der Installation und fragt ihn über `OpenSubKey` ab
+    (`Test-MachineKey`). Und: `sysmon -u` kam in diesem Lauf rund 3 s nach der Installation und ging durch. Der
+    kurze Abstand, der am 13.11. als einzige Auffälligkeit notiert wurde, erklärt den Absturz also nicht; die
+    Ursache bleibt offen.
+- **Offen in M2:** Verhalten nach dem Aufwachen aus dem Ruhezustand; Entscheidung des Inhabers, ob der Dienst
+  weiter ins Windows-Anwendungslog schreibt. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
