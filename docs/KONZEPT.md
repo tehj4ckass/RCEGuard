@@ -522,7 +522,21 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     ob ein Administrator den Schlüssel löschen darf (die Zugriffsliste sagt ja). Offen ist auch, ob der
     Registry-Schlüssel `Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational` ein Rest des
     Absturzes ist oder nach jedem `sysmon -u` bleibt; er ist ohne Admin-Rechte nicht lesbar.
-- **Offen in M2:** die halb entfernte Sysmon-Installation abräumen (`uninstall.ps1 -RemoveStuckSysmonService`,
-  Neustart, `uninstall.ps1`), danach `install-test.ps1` noch einmal vollständig; Verhalten nach dem Aufwachen aus
-  dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  - *Lauf als Administrator (14.11.2026): der Ausweg trägt.* Der Inhaber hat `uninstall.ps1
+    -RemoveStuckSysmonService` ausgeführt, Windows neu gestartet (00:19:05 angefordert, 00:19:29 gestartet) und
+    `uninstall.ps1` noch einmal ausgeführt. Stand um 00:21: Windows führt den Dienst `Sysmon64` nicht mehr, im
+    System-Log steht seit dem Start kein Fehler zu Sysmon, und weg sind `Sysmon64.exe`, die Logdatei von Sysmon,
+    der Lizenzvermerk (samt leerem Schlüssel `HKCU:\Software\Sysinternals`) und der Datenordner;
+    `install-test.ps1 -ListOnly` meldet „Nothing of an RCEGuard installation is on this machine“. Damit ist
+    bestätigt: Ein Administrator darf den Schlüssel löschen, und Windows lässt den geschützten Dienst nach dem
+    Neustart fallen. Die Ausgabe der beiden Läufe liegt nicht vor; `uninstall.log` ist mit dem Datenordner
+    entfernt worden, wie vorgesehen.
+  - *Ein Rest:* Der Registry-Schlüssel `Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational`
+    ist noch da (der Kanal selbst ist weg: `wevtutil gl` kennt ihn nicht). Ob er nach jedem `sysmon -u` bleibt oder
+    nur nach dem abgestürzten, ist offen. `install-test.ps1` protokolliert ihn jetzt (vor dem Test, während der
+    Installation, nach dem Entfernen), zählt ihn aber nicht als Rest; der nächste vollständige Lauf zeigt, was
+    gilt. Bleibt er auch nach einem sauberen `sysmon -u`, muss `uninstall.ps1` ihn entfernen (mit Vermerk in der
+    Statusdatei, ob er vor der Installation schon da war).
+- **Offen in M2:** `install-test.ps1` einmal vollständig (Schritte A bis D), dabei die Frage nach dem
+  Autologger-Schlüssel; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.

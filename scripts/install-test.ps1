@@ -77,6 +77,14 @@ if (-not $UninstallScript) { $UninstallScript = Join-Path $PSScriptRoot 'uninsta
 $servicesKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $sysmonServiceNames = @('Sysmon64', 'Sysmon', 'Sysmon64a')
 
+# Reported, but not counted as a trace: this key was still there after the uninstall of 2026-11-13/14,
+# and it is not known yet whether every 'sysmon -u' leaves it or only the one during which Sysmon
+# crashed. A complete run of this test answers that.
+$sysmonAutologgerKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational'
+function Get-AutologgerNote([string] $when) {
+    "${when}: $(if (Test-Path -LiteralPath $sysmonAutologgerKey) { 'there' } else { 'not there' })"
+}
+
 function Get-InstallationTraces {
     <#
         Everything an RCEGuard installation puts on the machine, each with whether it is there now.
@@ -120,6 +128,7 @@ if ($ListOnly) {
     $present = @(Get-PresentNames $traces @('guard', 'data', 'sensor'))
     if ($present.Count -eq 0) { Write-Host 'Nothing of an RCEGuard installation is on this machine.' }
     else { Write-Host "$($present.Count) of $($traces.Count) are present." }
+    Write-Host "Not counted: Sysmon's autologger entry in the registry ($(Get-AutologgerNote 'now'))."
     return
 }
 
@@ -144,6 +153,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ServicePath $neededFile) -PathType 
 }
 
 $before = @(Get-InstallationTraces)
+$autologger = @(Get-AutologgerNote 'before the test')
 # The file of Sysmon's log and the licence note may be there from an earlier Sysmon of the owner:
 # they are not ours, must survive the test, and so are allowed to be there.
 $blocking = @(Get-PresentNames $before @('guard', 'data', 'sensor') | Where-Object { $_ -notin @('Sysmon event log file', 'Sysinternals licence note (this user)') })
@@ -248,6 +258,7 @@ try {
     $running = $null -ne $service -and $service.State -eq 'Running'
     Add-Check 'C' 'the service runs' $running $(if ($null -eq $service) { 'no such service' } else { "$($service.State), start mode $($service.StartMode), pid $($service.ProcessId)" })
     Add-Check 'C' 'the service starts with Windows' ($null -ne $service -and $service.StartMode -eq 'Auto') $(if ($null -ne $service) { $service.StartMode } else { '' })
+    $autologger += Get-AutologgerNote 'while installed'
 
     # --- D. Remove everything ---------------------------------------------------------------------
     Write-Host ''
@@ -257,6 +268,7 @@ try {
     Add-Message 'D: uninstall.ps1' $removeError
     Add-Check 'D' 'uninstall.ps1 succeeds' (-not $removeError) (First-Line $removeError)
     $after = @(Get-InstallationTraces)
+    $autologger += Get-AutologgerNote 'after uninstall.ps1'
     $beforeNames = @(Get-PresentNames $before @('guard', 'data', 'sensor'))
     $afterNames = @(Get-PresentNames $after @('guard', 'data', 'sensor'))
     $added = @($afterNames | Where-Object { $_ -notin $beforeNames })
@@ -286,6 +298,7 @@ $report = @(
     ''
     "Verdict: $verdict"
     "On the machine now: $(if ($leftNow.Count) { $leftNow -join '; ' } else { 'nothing of an RCEGuard installation' })"
+    "Sysmon's autologger entry in the registry (not counted): $($autologger -join '; ')"
 )
 if ($messages.Count -gt 0) {
     $report += ''
