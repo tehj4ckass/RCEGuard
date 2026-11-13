@@ -419,7 +419,16 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     Admin-Rechte gegen Stellvertreter (Datei im Temp-Ordner, Schlüssel unter `HKCU`) in PowerShell 7 und 5.1, auch mit
     geöffneter Datei, mit belegtem Nachbarschlüssel und mit einer alten Statusdatei. `install.ps1` und `uninstall.ps1`
     selbst liefen mit den Änderungen noch nicht.
-- **Offen in M2:** Installieren und Entfernen mit den geänderten Skripten als Administrator (bleibt danach wirklich
-  nichts zurück, lässt sich die Logdatei direkt nach `sysmon -u` löschen?); Aufräumen, wenn der Dienst nicht starten
-  kann; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  - *Lauf mit den geänderten Skripten (13.11.2026, 13:40, als Administrator):* Die Reste des ersten Laufs wurden
+    einmalig von Hand gelöscht, dann `install.ps1` (mit `-DownloadSysmon -AcceptSysmonEula`) und `uninstall.ps1`.
+    Der Dienst lief laut Anwendungslog von 13:40:30 bis 13:40:42. Danach war bei derselben Prüfung ohne Admin-Rechte
+    nichts mehr vorhanden: keine Dienste, kein Treiber, keine Ordner, keine Sysmon-Dateien im Windows-Ordner, kein
+    Anbieter und kein Kanal, keine Logdatei von Sysmon, kein Lizenzvermerk (auch der dann leere Schlüssel
+    `HKCU\Software\Sysinternals` nicht), keine Ereignisquellen, keine Prozesse, kein Download-Ordner. Die Logdatei
+    ließ sich also direkt nach `sysmon -u` löschen. Geblieben sind wie beschrieben die Einträge im Anwendungslog;
+    ohne die Ereignisquelle zeigt Windows deren Text nicht mehr an.
+  - *Nicht geprüft:* `-KeepData`; Entfernen unter einem anderen Benutzer als dem installierenden; eine Installation
+    auf einem Rechner, auf dem Logdatei oder Lizenzvermerk schon vorher da waren (dort müssen beide bleiben; das
+    lief nur gegen Stellvertreter).
+- **Offen in M2:** Aufräumen, wenn der Dienst nicht starten kann; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
