@@ -376,6 +376,16 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     118 bis 1136 ms, alle sieben Dienstprüfungen. Start: ein Ereignis nachgeholt, kein Befund. Neustart nach 62 s
     (vierter Abbruch des Tages), danach 39 Ereignisse nachgeholt, das während des Ausfalls gestartete Programm 61 s
     nach dem Ereignis gefunden, Kind und Client beendet. `sysmon-position.json` stand danach auf dem letzten Record.
-- **Offen in M2:** Start nach einem Rechner-Neustart; Entfernen mit `uninstall.ps1`; Aufräumen, wenn der Dienst nicht
-  starten kann. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+- **Start nach Rechner-Neustart (12./13.11.2026): geprüft.** Drei Systemstarts laut System-Log: 12.11. 22:54:39 und
+  22:55:46 (Neustart durch den Inhaber, der zweite von Windows Update ausgelöst), danach heruntergefahren, Kaltstart am
+  13.11. 13:27:14. Der Dienst startete jedes Mal von selbst, 12 s, 10 s und 10 s nach dem Kernel, im dritten Fall
+  0,2 s nach dem Sysmon-Dienst (Prozessstartzeiten). Er setzte jeweils an der gespeicherten Position fort (nach Record
+  5853, 5855, 5858) und holte die zwei Ereignisse nach, die Sysmon bei seinem eigenen Start schreibt; beim ersten
+  Start war nichts nachzuholen. Keine Zeile „cannot run“. Danach ohne Admin-Rechte mit dem Simulator geprüft:
+  `--spawn` nach 831 ms erkannt, Kind und Client beendet; `--connect` nach 1586 ms gemeldet, Client läuft weiter.
+  Der Schnellstart von Windows ist auf dem Testrechner eingeschaltet; ob der Dienst nach einem Aufwachen aus dem
+  Ruhezustand (Herunterfahren mit Schnellstart, Energiesparen) weiter Ereignisse bekommt, ist damit nicht geprüft:
+  Die Prozessstartzeit zeigt, dass der Dienst am 13.11. neu gestartet und nicht aufgeweckt wurde.
+- **Offen in M2:** Entfernen mit `uninstall.ps1`; Aufräumen, wenn der Dienst nicht starten kann; Verhalten nach dem
+  Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
