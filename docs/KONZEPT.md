@@ -430,5 +430,32 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
   - *Nicht geprüft:* `-KeepData`; Entfernen unter einem anderen Benutzer als dem installierenden; eine Installation
     auf einem Rechner, auf dem Logdatei oder Lizenzvermerk schon vorher da waren (dort müssen beide bleiben; das
     lief nur gegen Stellvertreter).
-- **Offen in M2:** Aufräumen, wenn der Dienst nicht starten kann; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+- **Dienst kann nicht starten (13.11.2026): Entfernen gehärtet, eigener Test, noch nicht als Administrator gelaufen.**
+  `install.ps1` entfernt einen Dienst wieder, der nicht startet (`Install-GuardService`); der Sensor bleibt, und
+  `install-state.json` sagt „kein Dienst“. Zwei Ursachen ließen sich ohne Admin-Rechte in der Konsole nachstellen:
+  ein Dienst-Build, dem `RCEGuard.Core.dll` fehlt (Prozess endet nach 0,65 s mit unbehandelter Ausnahme, kein Log),
+  und eine `appsettings.json`, die kein gültiges JSON ist (nach 1 s „RCEGuard cannot run: Configuration is not valid
+  JSON“, Exit-Code 1).
+  - *Lücke beim Lesen des Skripts:* Im zweiten Fall beendet sich der Dienst selbst, und Windows startet ihn nach 5 s
+    neu. `Uninstall-GuardService` stoppte erst und löschte dann; trifft das Stoppen einen Dienst, der gerade stirbt
+    oder gerade wieder startet, schlägt es fehl, die Registrierung bleibt, und Windows startet einen
+    LocalSystem-Dienst, der nicht laufen kann, immer wieder. Ob das auf diesem Rechner wirklich eintritt, ist nicht
+    gemessen; die Reihenfolge ist jetzt so, dass es nicht darauf ankommt: erst den Dienst deaktivieren (einen
+    deaktivierten Dienst startet auch die Wiederherstellung nicht), dann regulär stoppen (ein Fehlschlag ist kein
+    Abbruch), dann Prozesse beenden, die aus `C:\Program Files\RCEGuard` laufen, dann löschen. Der Ordner wird bis zu
+    10 s lang wiederholt gelöscht, weil ein eben beendeter Prozess seine Dateien noch kurz hält. Scheitert auch das
+    Entfernen, sagt die Fehlermeldung das und nennt `uninstall.ps1`.
+  - *Test `scripts\install-test.ps1`:* installiert auf einem Rechner ohne RCEGuard und ohne Sysmon dreimal (Build
+    ohne `RCEGuard.Core.dll`, kaputte `appsettings.json`, fehlerfrei) und entfernt einmal. Nach den beiden
+    Fehlschlägen müssen Dienst, Ordner und Ereignisquellen weg sein, der Sensor noch da, die Statusdatei „kein
+    Dienst“ sagen und nach 8 s nichts zurückgekommen sein; am Ende muss der Rechner aussehen wie vorher. Was schon
+    vorher da war (Logdatei oder Lizenzvermerk eines früheren Sysmon), muss bleiben. `-ListOnly` listet ohne
+    Admin-Rechte, was von einer Installation auf dem Rechner ist; das ersetzt den Vergleich von Hand vom Vormittag.
+  - *Geprüft:* das Testskript mit Stellvertretern für `install.ps1` und `uninstall.ps1` in PowerShell 7 und 5.1
+    (jede Zeile läuft unter Strict Mode; die Prüfungen zu Sysmon und zum laufenden Dienst fallen dabei wie erwartet
+    durch, die zur Fehlermeldung bestehen, mit „Entfernen fehlgeschlagen“ als Meldung fallen auch sie durch).
+    `-ListOnly` in beiden Versionen auf dem leeren Rechner.
+  - *Nicht geprüft:* das gehärtete `Uninstall-GuardService` und der Test selbst als Administrator. Dienste lassen
+    sich ohne Admin-Rechte nicht anlegen, einen Stellvertreter dafür gibt es nicht.
+- **Offen in M2:** `install-test.ps1` als Administrator; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.

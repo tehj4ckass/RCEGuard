@@ -120,8 +120,9 @@ function Install-GuardService([string] $sourceDir, [string] $sysmonServiceName, 
     catch {
         # A service that cannot run would be restarted by Windows over and over. Remove it again.
         $reason = $_.Exception.Message
-        try { $null = Uninstall-GuardService } catch { $reason += "`nRemoving the service failed as well: $($_.Exception.Message)" }
-        throw "$reason`nThe service was removed again; the sensor stays installed."
+        try { $null = Uninstall-GuardService }
+        catch { throw "$reason`nRemoving the service failed as well: $($_.Exception.Message)`nRun uninstall.ps1 to remove what is left." }
+        throw "$reason`nThe service was removed again; the sensor stays installed. Fix the cause and run install.ps1 again, or remove the sensor too with uninstall.ps1."
     }
 }
 
@@ -148,6 +149,21 @@ function Remove-GuardEventSources {
     return $removed
 }
 
+function Get-GuardProcesses {
+    # Processes running the installed service binary (not a build started from somewhere else).
+    $exe = Join-Path $script:GuardInstallDir $script:GuardExeName
+    @(Get-CimInstance Win32_Process -Filter "Name='$script:GuardExeName'" |
+        Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $exe, [StringComparison]::OrdinalIgnoreCase) })
+}
+
+function Stop-GuardProcesses {
+    foreach ($process in (Get-GuardProcesses)) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    $deadline = (Get-Date).AddSeconds(10)
+    while (@(Get-GuardProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+}
+
 function Uninstall-GuardService {
     <#
         Stops and removes the service, its folder in Program Files and its registrations as an
@@ -161,14 +177,28 @@ function Uninstall-GuardService {
             Write-Warning "A service named '$script:GuardServiceName' runs '$(Get-GuardServiceBinary $existing)'. RCEGuard did not install it; it is left alone."
             return $false
         }
-        Stop-GuardService
+        # First make sure nothing starts it again. Windows restarts a service whose process died, and a
+        # service that cannot run dies again and again: without this, such a restart can fall into the
+        # middle of the removal. A disabled service is not started, by nobody.
+        Invoke-Sc @('config', $script:GuardServiceName, 'start=', 'disabled') 'Disabling the service'
+        # A service that is just starting or has just died cannot be stopped the regular way.
+        try { Stop-GuardService } catch { Write-Verbose "Stopping the service the regular way failed: $($_.Exception.Message)" }
+        Stop-GuardProcesses
         Invoke-Sc @('delete', $script:GuardServiceName) 'Removing the service'
         $deadline = (Get-Date).AddSeconds(15)
         while ($null -ne (Get-GuardService) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
         $removed = $true
     }
     if (Test-Path -LiteralPath $script:GuardInstallDir) {
-        Remove-Item -LiteralPath $script:GuardInstallDir -Recurse -Force
+        # A process that has just ended may hold its files for a moment longer.
+        $deadline = (Get-Date).AddSeconds(10)
+        while ($true) {
+            try { Remove-Item -LiteralPath $script:GuardInstallDir -Recurse -Force -ErrorAction Stop; break }
+            catch {
+                if ((Get-Date) -gt $deadline) { throw }
+                Start-Sleep -Milliseconds 300
+            }
+        }
         $removed = $true
     }
     if (Remove-GuardEventSources) { $removed = $true }

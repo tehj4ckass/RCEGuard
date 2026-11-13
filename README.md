@@ -17,7 +17,7 @@ started under the name WowGuard.
 | Milestone | Content | State |
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
-| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. **Not yet verified:** the cleanup when the service cannot start, and the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
+| M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. For a service that cannot start there is a test of its own now (`scripts\install-test.ps1`), and removing the service was made safe against a restart by Windows in the middle of it; **both have only run against stand-ins, not as administrator**. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | open |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
@@ -274,6 +274,33 @@ client afterwards. The simulator switch `--hold [seconds]` used by the test keep
 (and for `--spawn` its child) alive, so the guard has something to terminate; a client that
 survives exits with code 3.
 
+### Install test
+
+```powershell
+.\scripts\install-test.ps1
+```
+
+Run in an administrator PowerShell on a machine **without** RCEGuard and without Sysmon (the test
+removes both at the end, so it refuses to start otherwise). It installs three times and removes
+once:
+
+1. with a published service that lacks a file, so its process dies at once;
+2. with a configuration file (`appsettings.json`) that is not valid JSON, so the service starts,
+   reports that it cannot run, and ends;
+3. without a fault: the service must run;
+4. `uninstall.ps1`: the machine must look as it did before the test.
+
+After 1 and 2 `install.ps1` must have failed with the reason, the service with its folder and its
+event sources must be gone, the sensor must still be installed, and nothing may come back within
+8 s: Windows restarts a failed service, and a service that cannot run would be started over and
+over. The result goes to `out\install-test-result.txt`.
+
+To only see what of an installation is on a machine (no admin rights needed, changes nothing):
+
+```powershell
+.\scripts\install-test.ps1 -ListOnly
+```
+
 ## Monitoring the real client
 
 To monitor the real client instead, run `install.ps1` again with its path, for example
@@ -352,6 +379,7 @@ scripts/SysmonTools.ps1                shared Sysmon helpers of the two scripts 
 scripts/GuardServiceTools.ps1          shared helpers for the RCEGuard Windows service
 scripts/show-events.ps1                prints or saves recorded events (admin)
 scripts/acceptance-test.ps1            simulator scenarios against the running guard (admin)
+scripts/install-test.ps1               install with a service that cannot start, uninstall, look for leftovers (admin; -ListOnly without)
 src/RCEGuard.Core/                     rule engine, event parser, configuration (no OS dependencies)
 src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
