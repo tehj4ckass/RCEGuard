@@ -8,6 +8,9 @@ $script:SysmonPublisherKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WI
 $script:SysmonLogFile = Join-Path $env:windir 'System32\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx'
 $script:SysmonEulaKey = 'HKCU:\Software\Sysinternals\System Monitor'
 
+# Where Windows keeps the registrations of services. A variable, so that a dry run can point it somewhere else.
+$script:ServicesKeyRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services'
+
 function Get-StateValue($state, [string] $name, $default = $false) {
     # A state file written by an earlier version of install.ps1 does not have every value.
     if ($null -ne $state -and $state.PSObject.Properties.Name -contains $name) { return $state.$name }
@@ -93,7 +96,7 @@ function Get-InstalledSysmon {
 function Test-SysmonDriverPresent {
     # Also by its registration: Windows does not list the driver to everyone, and a registered driver is loaded again at the next start.
     ($null -ne (Get-CimInstance Win32_SystemDriver -Filter "Name='SysmonDrv'")) -or
-        (Test-Path -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\SysmonDrv')
+        (Test-Path -LiteralPath (Join-Path $script:ServicesKeyRoot 'SysmonDrv'))
 }
 
 function Get-SysmonRemains {
@@ -115,19 +118,87 @@ function Wait-SysmonGone([int] $seconds = 10) {
     }
 }
 
-function Uninstall-Sysmon([string] $exe) {
+# What the last Uninstall-Sysmon did, attempt by attempt, for the log of uninstall.ps1.
+$script:SysmonUninstallNotes = @()
+
+function Add-SysmonUninstallNote($attempt) {
+    $script:SysmonUninstallNotes += "$($attempt.CommandLine) -> exit code $($attempt.ExitCode)`n$($attempt.Output)"
+}
+
+function Get-SysmonServiceRecord {
+    <#
+        The Sysmon service as Windows has it, or $null if no Sysmon service is listed:
+        its state, whether its registration is still in the registry, and whether it is registered
+        as a protected service (Sysmon 15 and later: 'antimalware light').
+    #>
+    $installed = Get-InstalledSysmon
+    if ($null -eq $installed) { return $null }
+    $service = Get-CimInstance Win32_Service -Filter "Name='$($installed.ServiceName)'"
+    $key = Join-Path $script:ServicesKeyRoot $installed.ServiceName
+    $keyPresent = Test-Path -LiteralPath $key
+    $protected = $false
+    if ($keyPresent) {
+        $values = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        $protected = $null -ne $values -and $values.PSObject.Properties.Name -contains 'LaunchProtected' -and [int] $values.LaunchProtected -ne 0
+    }
+    [pscustomobject]@{
+        ServiceName = $installed.ServiceName
+        Exe         = $installed.Exe
+        Stopped     = $null -ne $service -and $service.State -eq 'Stopped'
+        KeyPath     = $key
+        KeyPresent  = $keyPresent
+        Protected   = $protected
+    }
+}
+
+function Remove-StuckSysmonService($record) {
+    <#
+        Deletes the registration of a Sysmon service that nothing can remove the regular way.
+        Windows reads the services from the registry when it starts: after a restart the service is gone.
+        Only for the case Uninstall-Sysmon found: stopped, protected, driver and event publisher gone.
+    #>
+    if (-not ($record.Stopped -and $record.Protected -and $record.KeyPresent)) {
+        throw "The Sysmon service '$($record.ServiceName)' is not in the state this removal is meant for; nothing was changed."
+    }
+    if (Test-SysmonDriverPresent) {
+        throw "The Sysmon driver is still there; RCEGuard does not take Sysmon apart by hand while it is. Nothing was changed."
+    }
+    Remove-Item -LiteralPath $record.KeyPath -Recurse -Force -ErrorAction Stop
+}
+
+function Uninstall-Sysmon([string] $exe, [bool] $removeStuckService = $false) {
     <#
         Runs 'sysmon -u' and checks on the machine, not by the exit code, that Sysmon is gone.
+        Returns 'gone', or 'restart' if Windows has to be restarted before the rest can be removed.
+
         'sysmon -u' can fail half way: on 2026-11-13 the Sysmon 15.22 service crashed while it was
         being uninstalled (access violation), 'sysmon -u' ended with exit code 5, and the service
         stayed registered without its driver and its event publisher. So: look, and try once more.
-        Throws with the output of both attempts if something is still there after that.
+
+        That half way can be a dead end. The Sysmon service is a protected service: Windows lets
+        only the service itself take that protection off, and refuses everyone else who wants to
+        delete it ("Access is denied", exit code 5). A service that ended before it got there can
+        neither do it any more nor be removed by 'sysmon -u'. What is left then is deleting its
+        registration from the registry and restarting Windows; that happens only with
+        $removeStuckService, which the owner asks for with 'uninstall.ps1 -RemoveStuckSysmonService'.
     #>
+    $script:SysmonUninstallNotes = @()
+
+    $record = Get-SysmonServiceRecord
+    if ($null -ne $record -and -not $record.KeyPresent) {
+        throw "The registration of the Sysmon service '$($record.ServiceName)' was deleted already, but Windows still lists the service; it drops it when it starts the next time. Restart Windows ('Restart', not 'Shut down') and run uninstall.ps1 again."
+    }
+    if (@(Get-SysmonRemains).Count -eq 0) {
+        # Nothing of it is registered any more; only files are left, and the caller removes those.
+        return 'gone'
+    }
+
     $first = Invoke-SysmonRaw $exe @('-u')
+    Add-SysmonUninstallNote $first
     $remains = @(Wait-SysmonGone)
     if ($remains.Count -eq 0) {
         if ($first.ExitCode -ne 0) { Write-Warning "Sysmon ended its uninstall with exit code $($first.ExitCode), but nothing of it is left." }
-        return
+        return 'gone'
     }
 
     Write-Warning "Sysmon did not uninstall completely (exit code $($first.ExitCode); still there: $($remains -join ', ')). Trying once more ..."
@@ -136,15 +207,42 @@ function Uninstall-Sysmon([string] $exe) {
     # forcing the removal of a loaded driver has restarted machines.
     $arguments = if ('driver' -in $remains) { @('-u') } else { @('-u', 'force') }
     $second = Invoke-SysmonRaw $exe $arguments
+    Add-SysmonUninstallNote $second
     $remains = @(Wait-SysmonGone)
-    if ($remains.Count -eq 0) { return }
+    if ($remains.Count -eq 0) { return 'gone' }
 
-    throw @"
-Sysmon could not be uninstalled completely; still there: $($remains -join ', ').
+    $attempts = @"
 First attempt (exit code $($first.ExitCode)): $($first.CommandLine)
 $($first.Output)
 Second attempt (exit code $($second.ExitCode)): $($second.CommandLine)
 $($second.Output)
+"@
+
+    $record = Get-SysmonServiceRecord
+    $stuck = $remains.Count -eq 1 -and $remains[0] -eq 'service' -and
+        $null -ne $record -and $record.Stopped -and $record.Protected -and $record.KeyPresent
+    if ($stuck -and $removeStuckService) {
+        Remove-StuckSysmonService $record
+        $script:SysmonUninstallNotes += "Deleted the registration '$($record.KeyPath)'."
+        return 'restart'
+    }
+    if ($stuck) {
+        throw @"
+The Sysmon service '$($record.ServiceName)' is still registered, and Sysmon cannot remove it any more.
+It is a protected service: Windows lets only the running service itself take that protection off, and
+this one has ended (its driver and its event publisher are gone already).
+$attempts
+What is left is deleting the registration of the service from the registry; Windows then drops the
+service when it starts the next time. To do that, run:
+    uninstall.ps1 -RemoveStuckSysmonService
+then restart Windows ('Restart', not 'Shut down') and run uninstall.ps1 once more.
+Nothing else was removed, so that it can go on from here.
+"@
+    }
+
+    throw @"
+Sysmon could not be uninstalled completely; still there: $($remains -join ', ').
+$attempts
 Restart Windows and run uninstall.ps1 again. Nothing else was removed, so that it can go on from here.
 "@
 }

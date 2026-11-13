@@ -487,6 +487,42 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     PowerShell 7 und 5.1 (sauber; Exit-Code 5 ohne Rest; halb entfernt mit und ohne Treiber; zweimal gescheitert;
     Exit-Code 0 mit Rest; Dienst stirbt wortlos, mit Grund, ist weg).
   - *Nicht geprüft:* ob `sysmon -u force` den halb entfernten Zustand auf dem Testrechner wirklich abräumt.
-- **Offen in M2:** die halb entfernte Sysmon-Installation mit `uninstall.ps1` abräumen, danach `install-test.ps1`
-  noch einmal vollständig; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  - *Zweiter Lauf von `uninstall.ps1` (13.11.2026, gegen 15:03): nichts entfernt.* Der Zustand war danach
+    unverändert, in den Windows-Logs steht zu dem Lauf nichts, und die Ausgabe des Skripts liegt nicht vor (sie
+    stand nur im Fenster). Deshalb schreibt `uninstall.ps1` jetzt bei einem Fehlschlag beide Sysmon-Aufrufe mit
+    Ausgabe und den Grund nach `C:\ProgramData\RCEGuard\uninstall.log`.
+  - *Ursache der Sackgasse (aus dem Zustand und der Windows-Dokumentation, nicht aus der Ausgabe von Sysmon):*
+    Der Dienst `Sysmon64` ist als geschützter Dienst registriert (`sc qprotection`: „Antischadsoftware, gering“,
+    Registry-Wert `LaunchProtected = 3`). Windows erlaubt bei einem solchen Dienst nur `sc start`, `sc qc`,
+    `sc config start=auto`, `sc interrogate` und `sc sdshow`; Löschen, Stoppen und Umkonfigurieren sind jedem
+    ungeschützten Prozess verwehrt, auch einem Administrator. Zum Deinstallieren muss der laufende Dienst den Schutz
+    selbst ablegen („Protecting anti-malware services“, Abschnitt „Unregistering the service“). Sysmon ist am 13.11.
+    um 13:51:06 abgestürzt, bevor es dazu kam; `sysmon -u` endete mit Exit-Code 5 (das ist „Zugriff verweigert“).
+    Jeder weitere `sysmon -u` läuft gegen dieselbe Wand. In Microsofts Forum ist dasselbe Bild mehrfach beschrieben
+    („DeleteService failed: Access is denied“, auch mit `-u force`), ohne bestätigte Lösung.
+  - *Dabei gesehen:* Sysmon ist auf diesem Rechner (Windows 11, Build 26300) öfter beim Entfernen abgestürzt als
+    bemerkt: Windows führt Absturzberichte für `Sysmon64.exe` 15.22 auch vom 12.11. 15:00 (0xc0000409 im Programm
+    selbst, aus dem Download-Ordner gestartet) und vom 13.11. 13:35 (0xc0000005 in `ntdll.dll`). Der Lauf um 13:35
+    ging trotzdem durch; der Absturz kam dort offenbar erst, nachdem der Dienst sich ausgetragen hatte.
+  - *Umsetzung:* `Uninstall-Sysmon` erkennt die Sackgasse (nur noch der Dienst da, gestoppt, geschützt, Treiber und
+    Ereignis-Anbieter weg) und sagt, was los ist. Der Ausweg ist ein eigener Schalter,
+    `uninstall.ps1 -RemoveStuckSysmonService`: Er löscht die Registrierung des Dienstes aus der Registry
+    (`HKLM\SYSTEM\CurrentControlSet\Services\<Dienst>`), sonst nichts, und nur in genau diesem Zustand. Windows
+    liest seine Dienste beim Start aus der Registry; nach einem Neustart ist der Dienst weg, und ein weiterer Lauf
+    von `uninstall.ps1` räumt den Rest ab (Sysmon wird dann nicht mehr aufgerufen, weil nichts mehr registriert
+    ist). Vor dem Neustart sagt ein weiterer Lauf nur, dass der Neustart fehlt. Ohne Schalter fasst das Skript die
+    Registry nicht an: Das ist ein Eingriff von Hand in Sysmons Installation, den der Inhaber auslöst, nicht das
+    Skript von sich aus.
+  - *Geprüft:* mit Stellvertretern in PowerShell 7 und 5.1 (Sysmon und Dienstliste gestellt, Registry-Schlüssel
+    unter `HKCU`): Sackgasse ohne und mit Schalter, Lauf vor und nach dem „Neustart“, Schalter in jedem anderen
+    Zustand wirkungslos (Dienst nicht geschützt, läuft noch, mehr als der Dienst übrig, Treiber registriert), dazu
+    eine Kopie von `uninstall.ps1` ohne Administrator-Zwang gegen einen Stellvertreter-Datenordner über alle vier
+    Läufe. Die neue Zustandsabfrage liest den echten Rechner richtig (gestoppt, geschützt, Schlüssel da).
+  - *Nicht geprüft:* ob Windows den Dienst nach dem Löschen des Schlüssels und einem Neustart wirklich fallen lässt;
+    ob ein Administrator den Schlüssel löschen darf (die Zugriffsliste sagt ja). Offen ist auch, ob der
+    Registry-Schlüssel `Control\WMI\Autologger\EventLog-Microsoft-Windows-Sysmon-Operational` ein Rest des
+    Absturzes ist oder nach jedem `sysmon -u` bleibt; er ist ohne Admin-Rechte nicht lesbar.
+- **Offen in M2:** die halb entfernte Sysmon-Installation abräumen (`uninstall.ps1 -RemoveStuckSysmonService`,
+  Neustart, `uninstall.ps1`), danach `install-test.ps1` noch einmal vollständig; Verhalten nach dem Aufwachen aus
+  dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
