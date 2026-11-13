@@ -91,7 +91,62 @@ function Get-InstalledSysmon {
 }
 
 function Test-SysmonDriverPresent {
-    $null -ne (Get-CimInstance Win32_SystemDriver -Filter "Name='SysmonDrv'")
+    # Also by its registration: Windows does not list the driver to everyone, and a registered driver is loaded again at the next start.
+    ($null -ne (Get-CimInstance Win32_SystemDriver -Filter "Name='SysmonDrv'")) -or
+        (Test-Path -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\SysmonDrv')
+}
+
+function Get-SysmonRemains {
+    # What of a Sysmon installation is still registered with Windows.
+    $remains = @()
+    if ($null -ne (Get-InstalledSysmon)) { $remains += 'service' }
+    if (Test-SysmonDriverPresent) { $remains += 'driver' }
+    if ($null -ne (Get-SysmonPublisherBinary)) { $remains += 'event publisher' }
+    return $remains
+}
+
+function Wait-SysmonGone([int] $seconds = 10) {
+    # Windows may take a moment to drop a service that was just removed. Returns what is still there after the wait.
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ($true) {
+        $remains = @(Get-SysmonRemains)
+        if ($remains.Count -eq 0 -or (Get-Date) -gt $deadline) { return $remains }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+function Uninstall-Sysmon([string] $exe) {
+    <#
+        Runs 'sysmon -u' and checks on the machine, not by the exit code, that Sysmon is gone.
+        'sysmon -u' can fail half way: on 2026-11-13 the Sysmon 15.22 service crashed while it was
+        being uninstalled (access violation), 'sysmon -u' ended with exit code 5, and the service
+        stayed registered without its driver and its event publisher. So: look, and try once more.
+        Throws with the output of both attempts if something is still there after that.
+    #>
+    $first = Invoke-SysmonRaw $exe @('-u')
+    $remains = @(Wait-SysmonGone)
+    if ($remains.Count -eq 0) {
+        if ($first.ExitCode -ne 0) { Write-Warning "Sysmon ended its uninstall with exit code $($first.ExitCode), but nothing of it is left." }
+        return
+    }
+
+    Write-Warning "Sysmon did not uninstall completely (exit code $($first.ExitCode); still there: $($remains -join ', ')). Trying once more ..."
+    Start-Sleep -Seconds 3
+    # 'force' goes on although parts are missing already. Not while the driver is still there:
+    # forcing the removal of a loaded driver has restarted machines.
+    $arguments = if ('driver' -in $remains) { @('-u') } else { @('-u', 'force') }
+    $second = Invoke-SysmonRaw $exe $arguments
+    $remains = @(Wait-SysmonGone)
+    if ($remains.Count -eq 0) { return }
+
+    throw @"
+Sysmon could not be uninstalled completely; still there: $($remains -join ', ').
+First attempt (exit code $($first.ExitCode)): $($first.CommandLine)
+$($first.Output)
+Second attempt (exit code $($second.ExitCode)): $($second.CommandLine)
+$($second.Output)
+Restart Windows and run uninstall.ps1 again. Nothing else was removed, so that it can go on from here.
+"@
 }
 
 function Remove-SysmonLeftovers([string] $exe) {

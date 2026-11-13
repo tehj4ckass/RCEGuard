@@ -457,5 +457,36 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
     `-ListOnly` in beiden Versionen auf dem leeren Rechner.
   - *Nicht geprüft:* das gehärtete `Uninstall-GuardService` und der Test selbst als Administrator. Dienste lassen
     sich ohne Admin-Rechte nicht anlegen, einen Stellvertreter dafür gibt es nicht.
-- **Offen in M2:** `install-test.ps1` als Administrator; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
+  - *Lauf als Administrator (13.11.2026, 13:51): Fehlstart-Fälle bestanden, Entfernen von Sysmon gescheitert.*
+    Schritte A, B und C: alle 18 Prüfungen bestanden. Nach beiden Fehlschlägen waren Dienst, Ordner und
+    Ereignisquellen weg, der Sensor blieb, die Statusdatei sagte „kein Dienst“, nach 8 s kam nichts zurück; die
+    Installation danach lief (Dienst „Running“, Autostart). Das System-Log bestätigt die vermutete Lücke: Im Fall B
+    meldete Windows um 13:50:50 „unerwartet beendet, Neustart in 5000 ms“, in derselben Sekunde stellte das Skript
+    den Dienst auf „deaktiviert“.
+  - *Dabei gesehen:* Der Build ohne `RCEGuard.Core.dll` scheitert nicht beim Starten selbst. Windows meldet den
+    Dienst als gestartet, der Prozess stirbt, und Windows startet ihn neu (13:50:08, :17, :25); `install.ps1` merkte
+    das erst nach 30 s Wartezeit. `Start-GuardService` sieht jetzt auch auf den Zustand des Dienstes und meldet
+    „ended right after it was started“, sobald er zwischen zwei Neustarts gestoppt ist.
+  - *Schritt D gescheitert: Sysmon ist beim Entfernen abgestürzt.* Zeitablauf: 13:51:01 Konfiguration neu geladen
+    (`sysmon -c`), 13:51:04 Dienst abonniert, 13:51:05 Dienst gestoppt, 13:51:06 Anwendungsfehler `Sysmon64.exe`
+    15.22 (Ausnahme 0xc0000005 in `ntdll.dll`), `sysmon -u` endete mit Exit-Code 5, Windows meldete „Sysmon64
+    unerwartet beendet“. Danach: Treiber, Ereignis-Anbieter und -Kanal weg; Dienst `Sysmon64` noch registriert
+    (gestoppt, Autostart), `Sysmon64.exe`, Logdatei, Lizenzvermerk und Datenordner noch da. `uninstall.ps1` brach an
+    der Stelle ab; die Statusdatei blieb, ein zweiter Lauf ist also möglich. Die beiden Läufe davor (13:35, 13:40)
+    gingen durch. Warum Sysmon abstürzte, ist nicht geklärt; auffällig ist nur der Abstand: `sysmon -u` kam 5 s nach
+    einem `sysmon -c` und 1 s nach dem Ende des Abos, in den Läufen davor nach 12 s oder mehr und ohne `sysmon -c`.
+  - *Umsetzung:* `Uninstall-Sysmon` in `SysmonTools.ps1` glaubt dem Exit-Code nicht mehr. Es sieht nach (bis 10 s),
+    ob Dienst, Treiber und Ereignis-Anbieter weg sind. Wenn nicht, versucht es `sysmon -u` nach 3 s noch einmal:
+    mit `force`, wenn der Treiber schon weg ist (Sysmon macht dann weiter, obwohl Teile fehlen), ohne `force`,
+    solange der Treiber da ist (die Regel aus M1 bleibt: kein erzwungenes Entfernen eines geladenen Treibers). Ist
+    danach noch etwas da, bricht `uninstall.ps1` mit der Ausgabe beider Versuche ab und entfernt sonst nichts, damit
+    ein weiterer Lauf nach einem Neustart weitermachen kann. Den Treiber erkennt `Test-SysmonDriverPresent` jetzt
+    auch an seinem Registry-Eintrag; ohne Admin-Rechte listet Windows ihn nicht. `install-test.ps1` schreibt die
+    vollständigen Meldungen der Skripte in die Ergebnisdatei (im Lauf oben ging Sysmons Ausgabe verloren).
+  - *Geprüft:* `Uninstall-Sysmon` und `Start-GuardService` mit Stellvertretern für Sysmon und für den Dienst in
+    PowerShell 7 und 5.1 (sauber; Exit-Code 5 ohne Rest; halb entfernt mit und ohne Treiber; zweimal gescheitert;
+    Exit-Code 0 mit Rest; Dienst stirbt wortlos, mit Grund, ist weg).
+  - *Nicht geprüft:* ob `sysmon -u force` den halb entfernten Zustand auf dem Testrechner wirklich abräumt.
+- **Offen in M2:** die halb entfernte Sysmon-Installation mit `uninstall.ps1` abräumen, danach `install-test.ps1`
+  noch einmal vollständig; Verhalten nach dem Aufwachen aus dem Ruhezustand. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.

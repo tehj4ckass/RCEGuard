@@ -71,8 +71,22 @@ function Start-GuardService([string] $dataDir) {
         $new = Read-TextFrom $logPath $offset
         if ($new -match 'Subscribed to') { return }
         $failed = $new -match 'RCEGuard cannot run'
-        if ($failed -or (Get-Date) -gt $deadline) {
-            $reason = if ($failed) { 'The service reported that it cannot run.' } else { 'The service did not start watching within 30 s.' }
+        # A process that dies before it can log anything (a file of the service is missing, say) only
+        # shows in the state of the service: Windows starts it again every few seconds, and in between it is stopped.
+        $now = Get-GuardService
+        $died = -not $failed -and ($null -eq $now -or $now.State -eq 'Stopped')
+        if ($died) {
+            # It may have said why in its last moment: look once more before calling it silent.
+            Start-Sleep -Milliseconds 300
+            $new = Read-TextFrom $logPath $offset
+            $failed = $new -match 'RCEGuard cannot run'
+            $died = -not $failed
+        }
+        if ($failed -or $died -or (Get-Date) -gt $deadline) {
+            $reason =
+                if ($failed) { 'The service reported that it cannot run.' }
+                elseif ($died) { 'The service ended right after it was started.' }
+                else { 'The service did not start watching within 30 s.' }
             throw "$reason Its log ('$logPath') says:`n$($new.Trim())"
         }
         Start-Sleep -Milliseconds 250

@@ -159,6 +159,11 @@ $brokenConfig = Join-Path $DataDir 'appsettings.json'
 $brokenService = Join-Path ([IO.Path]::GetTempPath()) ("rceguard-broken-service-" + [guid]::NewGuid().ToString('N'))
 
 $checks = @()
+# What install.ps1 and uninstall.ps1 said when they stopped, in full: the table only has room for the first line.
+$messages = @()
+function Add-Message([string] $step, [string] $text) {
+    if ($text) { $script:messages += "--- $step ---`n$text" }
+}
 function Add-Check([string] $step, [string] $check, [bool] $ok, [string] $value = '') {
     $script:checks += [pscustomobject]@{ Step = $step; Check = $check; Value = $value; Result = $(if ($ok) { 'PASS' } else { 'FAIL' }) }
 }
@@ -212,7 +217,8 @@ try {
     Copy-Item -LiteralPath $ServicePath -Destination $brokenService -Recurse
     Remove-Item -LiteralPath (Join-Path $brokenService $neededFile) -Force
     $message = Invoke-Install $brokenService
-    Test-FailedStart 'A' $message 'could not be started|did not start watching'
+    Add-Message 'A: install.ps1' $message
+    Test-FailedStart 'A' $message 'could not be started|ended right after it was started|did not start watching'
     if (-not $AllowNonAdmin -and 'Sysmon service' -notin @(Get-PresentNames @(Get-InstallationTraces) @('sensor'))) {
         throw "Sysmon is not installed after step A, so the other steps cannot run. install.ps1 said: $message"
     }
@@ -224,6 +230,7 @@ try {
     Set-Content -LiteralPath $brokenConfig -Value '{ "profiles": [ { "name": "Default", ' -Encoding UTF8
     try {
         $message = Invoke-Install $ServicePath
+        Add-Message 'B: install.ps1' $message
         Test-FailedStart 'B' $message 'cannot run'
         Add-Check 'B' 'the message quotes the log of the service' ($message -match 'not valid JSON')
     }
@@ -235,6 +242,7 @@ try {
     Write-Host ''
     Write-Host 'C. Installing without a fault ...' -ForegroundColor Cyan
     $message = Invoke-Install $ServicePath
+    Add-Message 'C: install.ps1' $message
     Add-Check 'C' 'install.ps1 succeeds after the failed attempts' (-not $message) (First-Line $message)
     $service = Get-GuardService
     $running = $null -ne $service -and $service.State -eq 'Running'
@@ -246,6 +254,7 @@ try {
     Write-Host 'D. Removing RCEGuard ...' -ForegroundColor Cyan
     $removeError = $null
     try { & $UninstallScript | Out-Host } catch { $removeError = [string] $_.Exception.Message; Write-Host "uninstall.ps1 stopped: $removeError" -ForegroundColor DarkYellow }
+    Add-Message 'D: uninstall.ps1' $removeError
     Add-Check 'D' 'uninstall.ps1 succeeds' (-not $removeError) (First-Line $removeError)
     $after = @(Get-InstallationTraces)
     $beforeNames = @(Get-PresentNames $before @('guard', 'data', 'sensor'))
@@ -278,6 +287,11 @@ $report = @(
     "Verdict: $verdict"
     "On the machine now: $(if ($leftNow.Count) { $leftNow -join '; ' } else { 'nothing of an RCEGuard installation' })"
 )
+if ($messages.Count -gt 0) {
+    $report += ''
+    $report += 'What the scripts said when they stopped:'
+    $report += $messages
+}
 $report | Set-Content -LiteralPath $resultFile -Encoding UTF8
 Write-Host ''
 $report | ForEach-Object { Write-Host $_ }
