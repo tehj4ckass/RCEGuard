@@ -18,7 +18,7 @@ started under the name WowGuard.
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. A service that cannot start is removed again: `scripts\install-test.ps1` showed that on 2026-11-13 for a service build with a missing file and for a configuration that is not valid JSON (service, folder and event sources gone, sensor still there, nothing restarted by Windows), and a normal installation worked right after. **The same run ended with a half-removed Sysmon:** the Sysmon service crashed while `sysmon -u` was uninstalling it. A second `sysmon -u` could not finish the job either: the service that was left is protected by Windows and can only be removed by itself. `uninstall.ps1` now checks on the machine whether Sysmon is gone, tries once more, and for this dead end has the switch `-RemoveStuckSysmonService`. That way out worked on the test machine on 2026-11-14 (switch, restart of Windows, `uninstall.ps1` again): nothing of RCEGuard and Sysmon was left. Right after that `install-test.ps1` passed completely (2026-11-14 00:24, 21 of 21 checks): both failed starts, the installation without a fault, and the removal, this time without a crash of Sysmon. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
-| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Done: computing the firewall rule of a profile (everything except the allowed addresses) and the configuration switches for it, with unit tests. **Nothing is applied yet:** no firewall rule is written and no lockdown happens; the guard says so at its start if the configuration turns `firewall` or `lockdown` on. Plan and decisions: `docs/KONZEPT.md` section 15 |
+| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. **Not yet run as administrator:** so far this is tested with a stand-in for Windows Firewall; whether Windows accepts the rules and whether they block is what `scripts\prevention-test.ps1` checks. Not built yet: Exploit Protection. Plan and decisions: `docs/KONZEPT.md` section 15 |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
 
@@ -143,23 +143,27 @@ Windows service is running: two guards would both act on every event):
 | `--config <file>` | configuration file, default `C:\ProgramData\RCEGuard\appsettings.json` |
 | `--data-dir <folder>` | data folder, default `C:\ProgramData\RCEGuard` |
 | `--replay <file>` | evaluate a saved events file instead of the live log, then exit; never terminates anything, needs no admin rights |
+| `--release [profile]` | end the lockdown of that profile (without a name: of every profile), then exit; see "Blocking in advance" |
 
 Without `appsettings.json` the client the sensor was installed for is the only profile, with an
 empty allowlist: every connection of the client is then an R2 alert. A configuration looks like
-this (`killOnUnknownRemote`, `killEnabled` and `repeatWindowSeconds` are optional; the values
-shown for the last two are the defaults):
+this (everything except `name` and `clientPath` is optional; the values shown for
+`killEnabled`, `repeatWindowSeconds`, `lockdown`, `killOnUnknownRemote` and `firewall` are the
+defaults). Profile names must be unique and must not contain `|`:
 
 ```json
 {
   "killEnabled": true,
   "repeatWindowSeconds": 300,
+  "lockdown": false,
   "profiles": [
     {
       "name": "Warmane",
       "clientPath": "D:\\Games\\Warmane\\Wow.exe",
       "allowedRemote": ["203.0.113.0/24"],
       "allowedHostnames": ["logon.example.org"],
-      "killOnUnknownRemote": false
+      "killOnUnknownRemote": false,
+      "firewall": false
     }
   ]
 }
@@ -241,6 +245,56 @@ firewall rules in M3.
 
 The guard stops with an error instead of idling if it cannot read the Sysmon log.
 
+### Blocking in advance (firewall and lockdown)
+
+Everything above reacts after the fact. Two switches make Windows Firewall block connections of
+the client before they happen. Both are off unless the configuration turns them on, and **neither
+has been run on a real system yet** (see the status table).
+
+**`"firewall": true` on a profile.** The service keeps one outbound block rule for the client in
+Windows Firewall (name `RCEGuard: <profile>`, group `RCEGuard`). The rule names every address
+except the entries of `allowedRemote`, the addresses `allowedHostnames` resolve to, and loopback.
+Windows Firewall has no "allow only these": a block rule wins over every allow rule, and what no
+rule blocks is allowed by default. RCEGuard therefore adds no allow rules and does not change the
+default policy; if outbound connections are blocked by default on your machine, the client needs
+an allow rule of its own.
+
+- The profile needs at least one allowed address or host name; without, the configuration is rejected.
+- Host names are resolved at the start and every 10 minutes (every 30 seconds while one fails).
+  A server that moves to a new address is blocked until the next refresh. A host name that
+  cannot be resolved keeps the addresses it had; one that never resolved has none, so its server
+  is blocked.
+- The rule stays in place while the service is stopped. It is written again at every start of
+  the service, so a rule changed by hand does not last.
+- If Windows Firewall is turned off for the network in use, or a group policy overrides local
+  rules, the rule blocks nothing; the guard writes a warning to its log.
+- Only the client's own program file is covered. A program the client starts is not (R1
+  terminates it; keeping it from starting is what Exploit Protection is for, not built yet).
+
+**`"lockdown": true` (kill switch).** After a finding that terminates the client, the profile is
+locked down: its rule blocks every outbound connection of the client, also to the allowed
+addresses, until someone releases it. The lockdown is noted in
+`C:\ProgramData\RCEGuard\lockdown.json` and survives restarts of the service and of Windows.
+It goes with terminating: with `"killEnabled": false` or `--dry-run` nothing is locked down, the
+log line of the finding only says that it would have been. A profile does not need `firewall`
+for this.
+
+A locked client starts but cannot connect to anything. Why is in `guard.log` (the line of the
+finding ends with "locked down") and in `lockdown.json`. To release, in a console **started as
+administrator**:
+
+```powershell
+& 'C:\Program Files\RCEGuard\RCEGuard.Service.exe' --release
+```
+
+It prints since when and after which finding each profile was locked, ends the lockdown and puts
+the rule back to what the configuration asks for (`--release <profile>` for one profile only).
+Look at the finding first: the lockdown is there because the client did something it never does.
+Until the tray application exists (M4), this command is the only way to release.
+
+If `lockdown.json` cannot be read, every profile is treated as locked down until `--release`
+replaces the file.
+
 ### Acceptance test
 
 Runs seven simulator scenarios against the running guard and checks that each one is detected
@@ -295,11 +349,31 @@ event sources must be gone, the sensor must still be installed, and nothing may 
 8 s: Windows restarts a failed service, and a service that cannot run would be started over and
 over. The result goes to `out\install-test-result.txt`.
 
+The firewall rules of RCEGuard count as part of the service: after a failed start and after
+`uninstall.ps1` none may be left.
+
 To only see what of an installation is on a machine (no admin rights needed, changes nothing):
 
 ```powershell
 .\scripts\install-test.ps1 -ListOnly
 ```
+
+### Prevention test
+
+```powershell
+.\scripts\prevention-test.ps1 -DownloadSysmon -AcceptSysmonEula
+```
+
+Run in an administrator PowerShell with an internet connection, after `.\build.ps1 -Publish`.
+It installs RCEGuard for the test client and checks on the installed service what the unit tests
+cannot: that Windows Firewall takes the rule and that it blocks. In order: the test client
+reaches two addresses while nothing is blocked; with the firewall on and only the first address
+allowed, the first still connects and the second does not; after the simulator started a
+program, the client is terminated and locked down, and not even the allowed address connects,
+also after a restart of the service; after `--release` the allowed address connects again; at
+the end the configuration is back as it was and no rule is left. Only the test client is ever
+blocked. The addresses are `1.1.1.1` and `1.0.0.1` on port 443 (`-AllowedAddress`,
+`-OtherAddress`, `-Port`). The result goes to `out\m3-result.txt`.
 
 ## Monitoring the real client
 
@@ -410,11 +484,12 @@ scripts/GuardServiceTools.ps1          shared helpers for the RCEGuard Windows s
 scripts/show-events.ps1                prints or saves recorded events (admin)
 scripts/acceptance-test.ps1            simulator scenarios against the running guard (admin)
 scripts/install-test.ps1               install with a service that cannot start, uninstall, look for leftovers (admin; -ListOnly without)
+scripts/prevention-test.ps1            firewall rule, lockdown and release against the installed service (admin, needs internet)
 src/RCEGuard.Core/                     rule engine, event parser, configuration, firewall rule planning (no OS dependencies)
-src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database
+src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database, firewall rules and lockdown
 src/RCEGuard.FakeWow/                  simulator, builds as Wow.exe
 tests/RCEGuard.Core.Tests/             unit tests, with recorded Sysmon events as fixtures
-tests/RCEGuard.Service.Tests/          process killer against real, harmless processes; resuming in real Windows logs (read only; for new events the tests start Windows PowerShell)
+tests/RCEGuard.Service.Tests/          process killer against real, harmless processes; resuming in real Windows logs (read only; for new events the tests start Windows PowerShell); firewall rules, lockdown and release against a stand-in for Windows Firewall (the real one is only read)
 build.ps1                              build wrapper that insists on a real .NET SDK; -Publish for the service
 ```
 

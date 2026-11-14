@@ -21,6 +21,12 @@ public sealed record ServiceOptions
     /// </summary>
     public string? ReplayPath { get; init; }
 
+    /// <summary>End a lockdown instead of running the guard.</summary>
+    public bool Release { get; init; }
+
+    /// <summary>The profile whose lockdown is ended; null means every profile in lockdown.</summary>
+    public string? ReleaseProfile { get; init; }
+
     /// <summary>
     /// The event log to read. Always the Sysmon log; only tests read another one, because the
     /// Sysmon log needs administrator rights. Not a command line option.
@@ -44,11 +50,14 @@ public sealed record ServiceOptions
           --data-dir <folder>  data folder (default: C:\ProgramData\RCEGuard)
           --replay <file>      evaluate a saved events file instead of the live log, then exit;
                                never terminates anything and needs no admin rights
+          --release [profile]  end the lockdown of that profile (without a name: of every profile),
+                               then exit; run it in a console started as administrator
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
         It notes the last event it handled in <data-dir>\sysmon-position.json and, when started again,
         first reads what was written to the Sysmon log in the meantime.
+        Profiles in lockdown are noted in <data-dir>\lockdown.json.
         """;
 
     /// <summary>Parses the arguments; returns null and an error text if they are not understood.</summary>
@@ -71,6 +80,14 @@ public sealed record ServiceOptions
                     break;
                 case "--replay" when i + 1 < args.Length:
                     options = options with { ReplayPath = Path.GetFullPath(args[++i]) };
+                    break;
+                case "--release":
+                    options = options with { Release = true };
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        options = options with { ReleaseProfile = args[++i] };
+                    }
+
                     break;
                 default:
                     error = $"Unknown or incomplete argument '{args[i]}'.";

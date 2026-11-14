@@ -19,6 +19,12 @@ public sealed class GuardWorker : BackgroundService
 {
     private static readonly TimeSpan HostRefreshInterval = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// While a host name could not be resolved (no network yet after a start of Windows), it is
+    /// tried again this often: with the firewall on, its server is blocked until then.
+    /// </summary>
+    private static readonly TimeSpan HostRetryInterval = TimeSpan.FromSeconds(30);
+
     /// <summary>The position is saved at once after a finding, otherwise at most this often.</summary>
     private static readonly TimeSpan PositionSaveInterval = TimeSpan.FromSeconds(1);
 
@@ -31,6 +37,15 @@ public sealed class GuardWorker : BackgroundService
     private readonly Channel<LogEntry> events = Channel.CreateUnbounded<LogEntry>(new UnboundedChannelOptions { SingleReader = true });
     private FindingDebouncer debouncer = new(TimeSpan.Zero);
     private bool positionSaveFailed;
+    private HostAddressBook? hosts;
+    private FirewallGuard? firewallGuard;
+    private LockOnKill lockOnKill = LockOnKill.Off;
+
+    /// <summary>Opens Windows Firewall. Tests put a stand-in here; the real one cannot be changed without administrator rights.</summary>
+    internal Func<IFirewall> OpenFirewall { get; init; } = () => new WindowsFirewall();
+
+    /// <summary>Resolves a host name. Tests replace the name resolution of Windows.</summary>
+    internal Func<string, CancellationToken, Task<IPAddress[]>>? ResolveHost { get; init; }
 
     /// <summary>
     /// An event may be in the log this long before its delivery counts as missing. Delivery normally
@@ -108,12 +123,12 @@ public sealed class GuardWorker : BackgroundService
         }
 
         logger.LogInformation("Configuration from {Source}; terminating processes is {State}", configSource, killEnabled ? "ON" : "OFF (dry run)");
-
-        // Not silently: someone who turned prevention on must not believe it is in place.
-        if (config.Lockdown || config.Profiles.Any(profile => profile.Firewall))
+        // Lockdown goes with terminating: where nothing is terminated, nothing is locked down either.
+        lockOnKill = !config.Lockdown ? LockOnKill.Off : killEnabled ? LockOnKill.On : LockOnKill.ReportOnly;
+        if (config.Lockdown)
         {
-            logger.LogWarning(
-                "The configuration turns on 'firewall' or 'lockdown'. This build does not apply firewall rules yet: nothing is blocked");
+            logger.LogInformation(
+                "Lockdown after a finding that terminates the client is {State}", killEnabled ? "ON" : "OFF (nothing is terminated, so nothing is locked down)");
         }
 
         if (options.ReplayPath is not null)
@@ -134,8 +149,18 @@ public sealed class GuardWorker : BackgroundService
         var plan = PlanResume(positionFile, out var newestAtStart);
 
         // The host names must be known before old events are evaluated, or their connections would all look unknown.
-        await RefreshHostsAsync(config, engine, stoppingToken);
-        var nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
+        hosts = new HostAddressBook(config, ResolveHost);
+        var nextHostRefresh = DateTimeOffset.UtcNow + await RefreshHostsAsync(hosts, engine, stoppingToken);
+
+        // The firewall rules before the first event: a lockdown from before the restart must be in place again.
+        // Every wanted rule is written anew once per start, so that a rule changed by hand does not stay.
+        firewallGuard = new FirewallGuard(
+            config,
+            OpenFirewall(),
+            new LockdownFile(Path.Combine(options.DataDirectory, LockdownFile.FileName)),
+            (level, message) => logger.Log(level, "{Message}", message),
+            dryRun: options.DryRun);
+        firewallGuard.Apply(hosts.ByProfile, force: true);
 
         using var tail = OpenTail(
             options.LogName,
@@ -159,8 +184,14 @@ public sealed class GuardWorker : BackgroundService
             {
                 if (DateTimeOffset.UtcNow >= nextHostRefresh)
                 {
-                    await RefreshHostsAsync(config, engine, stoppingToken);
-                    nextHostRefresh = DateTimeOffset.UtcNow + HostRefreshInterval;
+                    nextHostRefresh = DateTimeOffset.UtcNow + await RefreshHostsAsync(hosts, engine, stoppingToken);
+                    firewallGuard.Apply(hosts.ByProfile);
+                }
+                else if (firewallGuard.ChangedOutside())
+                {
+                    // The release command ended a lockdown (and wrote the rules itself already).
+                    logger.LogInformation("The lockdown state was changed from outside the guard; bringing the firewall rules in line");
+                    firewallGuard.Apply(hosts.ByProfile);
                 }
 
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -340,6 +371,17 @@ public sealed class GuardWorker : BackgroundService
                     ? "not acted on (replay)"
                     // The time of the event lets the killer tell the process of the event from a later one with the same pid.
                     : string.Join("; ", finding.KillTargets.Select(target => killer.Kill(target, finding.Time)));
+
+                // Kill switch: what made the client do this may still be there when it is started again.
+                if (killer is not null && finding.Profile.Length > 0 && firewallGuard is not null && hosts is not null)
+                {
+                    taken += lockOnKill switch
+                    {
+                        LockOnKill.On => "; " + firewallGuard.Lock(finding, hosts.ByProfile),
+                        LockOnKill.ReportOnly => "; would lock down the profile",
+                        _ => string.Empty,
+                    };
+                }
             }
 
             reported++;
@@ -373,31 +415,21 @@ public sealed class GuardWorker : BackgroundService
         return reported;
     }
 
-    private async Task RefreshHostsAsync(GuardConfig config, RuleEngine engine, CancellationToken cancellationToken)
+    /// <summary>Resolves the host names again and tells the rule engine. Returns when to do it next.</summary>
+    private async Task<TimeSpan> RefreshHostsAsync(HostAddressBook book, RuleEngine engine, CancellationToken cancellationToken)
     {
-        foreach (var profile in config.Profiles.Where(p => p.AllowedHostnames.Count > 0))
+        var problems = await book.RefreshAsync(cancellationToken);
+        foreach (var problem in problems)
         {
-            var addresses = new List<IPAddress>();
-            var failed = 0;
-            foreach (var host in profile.AllowedHostnames)
-            {
-                try
-                {
-                    addresses.AddRange(await Dns.GetHostAddressesAsync(host, cancellationToken));
-                }
-                catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ArgumentException)
-                {
-                    failed++;
-                    logger.LogWarning("Host name '{Host}' of profile '{Profile}' could not be resolved: {Reason}", host, profile.Name, ex.Message);
-                }
-            }
-
-            // Keep the previous addresses if nothing could be resolved (e.g. no network yet).
-            if (addresses.Count > 0 || failed == 0)
-            {
-                engine.SetResolvedHosts(profile.Name, addresses);
-            }
+            logger.LogWarning("{Problem}", problem);
         }
+
+        foreach (var (profile, addresses) in book.ByProfile)
+        {
+            engine.SetResolvedHosts(profile, addresses);
+        }
+
+        return problems.Count == 0 ? HostRefreshInterval : HostRetryInterval;
     }
 
     private string Explain(Exception ex) => ex switch
@@ -410,6 +442,19 @@ public sealed class GuardWorker : BackgroundService
         Microsoft.Data.Sqlite.SqliteException => $"the findings database in '{options.DataDirectory}' cannot be opened: {ex.Message}",
         _ => ex.ToString(),
     };
+}
+
+/// <summary>What a finding that terminates the client does to its profile.</summary>
+internal enum LockOnKill
+{
+    /// <summary>Nothing: lockdown is not turned on.</summary>
+    Off,
+
+    /// <summary>The profile is put in lockdown.</summary>
+    On,
+
+    /// <summary>Lockdown is turned on, but nothing is terminated (dry run): it is only said.</summary>
+    ReportOnly,
 }
 
 /// <summary>The log holds events that the subscription did not deliver.</summary>

@@ -591,11 +591,54 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
   Tray-App da ist, entscheidet der Inhaber.
 - **Die Sperre hängt an `killEnabled`.** Mit `killEnabled: false` (empfohlen für die erste Beobachtung des echten
   Clients) wird weder beendet noch gesperrt, nur gemeldet. Ein Schalter für beides.
-- **Bis Schritt 2 wird nichts angewendet.** Der Dienst meldet beim Start eine Warnung, wenn die Konfiguration `firewall`
-  oder `lockdown` einschaltet, damit niemand eine Sperre für wirksam hält, die es noch nicht gibt.
-- **Offen für Schritt 2:** Hostnamen, die beim Start nicht auflösen (kein Netz), dürfen den Client nicht zehn Minuten
-  sperren: schneller neu auflösen, solange etwas fehlt. Prüfen, ob die Firewall überhaupt aktiv ist und ob lokale
-  Regeln gelten (Gruppenrichtlinie); sonst sichtbar warnen. Die Freigabe ohne Tray-App: als Befehl des Dienstprogramms
-  für einen Administrator.
+- **Schritt 2 (15.11.2026): Der Dienst schreibt die Regeln, sperrt und gibt frei.** Noch nicht als Administrator
+  gelaufen; die Warnung „wird noch nicht angewendet“ aus Schritt 1 ist entfallen.
+  - *Zugriff auf die Firewall:* COM (`HNetCfg.FwPolicy2`) über `dynamic`, hinter der Schnittstelle `IFirewall`.
+    Lesen geht für jeden Benutzer, Schreiben braucht Admin-Rechte oder `LocalSystem`. Eine vorhandene Regel wird an
+    Ort und Stelle geändert, damit es keinen Moment ohne Regel gibt; die Beschreibung mit dem Fingerabdruck wird
+    zuletzt gesetzt, damit eine halb geänderte Regel nicht wie die gewünschte aussieht. Angefasst werden nur Regeln
+    der Gruppe `RCEGuard`.
+  - *Abgleich (`FirewallGuard.Apply`):* beim Start (dann wird jede gewünschte Regel neu geschrieben, damit eine von
+    Hand geänderte nicht bleibt), nach jedem Auflösen der Hostnamen, nach einer Sperre und wenn sich `lockdown.json`
+    von außen ändert. Sonst wird nur geschrieben, was abweicht (Beschreibung, eingeschaltet, ausgehend sperrend,
+    Programmpfad). Regeln der Gruppe, die niemand mehr verlangt, werden entfernt.
+  - *Die Sperre steht in `lockdown.json` im Datenordner, die Regeln werden daraus abgeleitet.* So übersteht sie einen
+    Neustart des Dienstes und von Windows, und Dienst und Freigabe-Befehl können beide schreiben, ohne sich
+    abzustimmen: Beide rechnen aus derselben Datei dasselbe aus. Ist die Datei nicht lesbar, gelten alle Profile als
+    gesperrt (eine unlesbare Datei könnte eine Sperre verbergen); `--release` ersetzt sie.
+  - *Wann gesperrt wird:* nach jedem Befund, der den Client beendet (auch R2 mit `killOnUnknownRemote`, auch bei
+    nachgeholten Ereignissen), sofern der Befund einem Profil gehört. R9 bei fremden Prozessen sperrt nichts. Der
+    erste Befund bleibt als Grund stehen; ein weiterer meldet „already in lockdown“.
+  - *Freigabe:* `RCEGuard.Service.exe --release [Profil]` für einen Administrator. Der Befehl leert die Datei, löst
+    die Hostnamen selbst auf und schreibt die Regeln selbst, damit er auch ohne laufenden Dienst wirkt; der laufende
+    Dienst sieht die geänderte Datei spätestens nach 15 s und gleicht noch einmal ab.
+  - *Firewall nicht änderbar:* Der Dienst meldet einen Fehler („… NOT be blocked“) und beobachtet weiter, statt zu
+    enden. Abweichung von „fail closed“ aus M2, bewusst: Ein Wächter, der wegen der Firewall gar nicht läuft, erkennt
+    auch nichts mehr. Die Sperre bleibt in der Datei vermerkt und greift beim nächsten Abgleich, der die Firewall
+    erreicht. Ist die Firewall für das aktive Netzwerkprofil aus oder überschreibt eine Gruppenrichtlinie lokale
+    Regeln, steht einmal eine Warnung im Log.
+  - *Hostnamen (`HostAddressBook`):* je Hostname gemerkt. Scheitert das Auflösen, behält der Name seine bisherigen
+    Adressen, und es wird nach 30 s statt nach 10 min neu versucht. Vorher ersetzte ein teilweiser Fehlschlag die
+    Adressen des ganzen Profils; mit eingeschalteter Firewall hätte das einen bekannten Server gesperrt.
+  - *`--dry-run`:* schreibt weder Regeln noch die Sperrdatei und sagt, welche Regeln es gäbe.
+  - *Entfernen:* `Uninstall-GuardService` löscht die Regeln der Gruppe (also auch nach einem gescheiterten Start bei
+    der Installation); `install-test.ps1` zählt sie als Teil des Dienstes. `lockdown.json` liegt im Datenordner und
+    geht mit ihm (bleibt mit `-KeepData`).
+  - *Geprüft:* 67 Dienst-Tests (31 neue) gegen eine Stellvertreter-Firewall, darunter die Wächter-Schleife mit einem
+    eingespielten R1-Ereignis (Prozess-IDs, die es nicht geben kann): Sperre, kein Sperren ohne Schalter und im
+    Trockenlauf, Regel beim Start, Sperre nach Neustart, Freigabe bei laufendem Wächter. Die echte Firewall wird in
+    einem Test nur gelesen (alle Regeln durchlaufen, Zustand der Netzwerkprofile); das zeigt, dass die COM-Aufrufe
+    stimmen. Der veröffentlichte Dienst hat ohne Admin-Rechte `--release` gegen einen Datenordner in TEMP
+    ausgeführt: Lesen ging, das Schreiben wurde mit „Zugriff verweigert“ sauber gemeldet, keine Regel entstand.
+  - *Abnahme:* `scripts/prevention-test.ps1` (Administrator, Internet). Trockenlauf mit Stellvertretern für Dienst,
+    Firewall, Simulator und Freigabe in PowerShell 7 und 5.1: 20 von 20; die Fehlvariante „Firewall sperrt nichts“
+    fällt mit 4 FAIL durch und räumt trotzdem auf. Der Trockenlauf fand einen Fehler im Skript (`$Port?` liest
+    PowerShell 7 als Variablenname). Die beiden Testadressen sind von diesem Rechner aus erreichbar.
+  - *Nicht geprüft:* ob Windows die Regeln beim Speichern annimmt, ob sie den Client sperren, wie eine gesperrte
+    Verbindung beim Simulator ankommt (Fehler sofort oder Zeitüberschreitung), der Freigabe-Befehl als Administrator.
+  - *Grenzen:* Die Regel gilt für die Programmdatei des Clients, nicht für Programme, die er startet. Regeln werden
+    über ihren Namen entfernt; eine fremde Regel mit genau dem Namen `RCEGuard: <Profil>` außerhalb der Gruppe könnte
+    dabei statt der eigenen getroffen werden. Eine Sperre, die nicht in die Datei geschrieben werden konnte, endet
+    mit dem nächsten Abgleich.
 - **Offen für Schritt 3:** ob `DisallowChildProcessCreation` den echten Client stört (Abschnitt 12) und ob der Simulator
   als Konsolenprogramm damit noch startet (Windows erzeugt für ihn `conhost.exe`).

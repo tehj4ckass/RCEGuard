@@ -28,7 +28,7 @@ installiert ihn `install.ps1`.
 
 ## Admin-Rechte
 
-`install.ps1`, `uninstall.ps1`, `show-events.ps1`, `acceptance-test.ps1` und `install-test.ps1` brauchen
+`install.ps1`, `uninstall.ps1`, `show-events.ps1`, `acceptance-test.ps1`, `install-test.ps1` und `prevention-test.ps1` brauchen
 Admin-Rechte und ändern Systemzustand. Agenten führen sie nicht selbst aus, sondern liefern die Befehle und werten
 die Rückmeldung des Inhabers aus. `render-config.ps1`, `build.ps1`, der Simulator und `install-test.ps1 -ListOnly`
 (listet nur, was von einer Installation auf dem Rechner ist) laufen ohne Admin-Rechte.

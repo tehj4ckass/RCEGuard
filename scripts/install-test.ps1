@@ -110,6 +110,7 @@ function Get-InstallationTraces {
     foreach ($source in $script:GuardEventSources) {
         $found += , @('guard', "event source '$source'", (Test-Path -LiteralPath (Join-Path $script:GuardEventLogRoot $source)))
     }
+    $found += , @('guard', "firewall rules of the group '$script:GuardFirewallGroup'", (@(Get-GuardFirewallRules).Count -gt 0))
     $found += , @('data', "folder '$DataDir'", (Test-Path -LiteralPath $DataDir))
     $found += , @('sensor', 'Sysmon service', (@($sysmonServiceNames | Where-Object { Test-Path -LiteralPath (Join-Path $servicesKey $_) }).Count -gt 0))
     $found += , @('sensor', 'Sysmon driver', (Test-Path -LiteralPath (Join-Path $servicesKey 'SysmonDrv')))

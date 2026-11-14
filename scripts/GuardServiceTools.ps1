@@ -163,6 +163,24 @@ function Remove-GuardEventSources {
     return $removed
 }
 
+# The service keeps its rules in Windows Firewall in this group (outbound block rules for the clients).
+$script:GuardFirewallGroup = 'RCEGuard'
+
+function Get-GuardFirewallRules {
+    # The firewall rules of RCEGuard. Reading works without administrator rights.
+    $policy = New-Object -ComObject HNetCfg.FwPolicy2
+    @($policy.Rules | Where-Object { $_.Grouping -ceq $script:GuardFirewallGroup })
+}
+
+function Remove-GuardFirewallRules {
+    # Returns $true if a rule was removed. Without the service nothing keeps the rules up to date:
+    # a rule left behind would block a client for good, or go on allowing addresses that changed.
+    $policy = New-Object -ComObject HNetCfg.FwPolicy2
+    $names = @($policy.Rules | Where-Object { $_.Grouping -ceq $script:GuardFirewallGroup } | ForEach-Object { [string] $_.Name })
+    foreach ($name in $names) { $policy.Rules.Remove($name) }
+    return $names.Count -gt 0
+}
+
 function Get-GuardProcesses {
     # Processes running the installed service binary (not a build started from somewhere else).
     $exe = Join-Path $script:GuardInstallDir $script:GuardExeName
@@ -180,8 +198,8 @@ function Stop-GuardProcesses {
 
 function Uninstall-GuardService {
     <#
-        Stops and removes the service, its folder in Program Files and its registrations as an
-        event source. Returns $true if there was something to remove. A service of that name that
+        Stops and removes the service, its folder in Program Files, its registrations as an
+        event source and its firewall rules. Returns $true if there was something to remove. A service of that name that
         RCEGuard did not install is left alone.
     #>
     $removed = $false
@@ -216,5 +234,6 @@ function Uninstall-GuardService {
         $removed = $true
     }
     if (Remove-GuardEventSources) { $removed = $true }
+    if (Remove-GuardFirewallRules) { $removed = $true }
     return $removed
 }

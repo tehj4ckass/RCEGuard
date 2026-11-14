@@ -15,6 +15,11 @@ if (options is null)
     return 2;
 }
 
+if (options.Release)
+{
+    return await ReleaseCommand.RunAsync(options, new WindowsFirewall(), Console.Out, Console.Error);
+}
+
 // The arguments are deliberately not passed on: they are not host configuration.
 var builder = Host.CreateApplicationBuilder();
 builder.Services.AddWindowsService(service => service.ServiceName = "RCEGuard");
