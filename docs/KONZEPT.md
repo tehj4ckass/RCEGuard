@@ -591,8 +591,8 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
   Tray-App da ist, entscheidet der Inhaber.
 - **Die Sperre hängt an `killEnabled`.** Mit `killEnabled: false` (empfohlen für die erste Beobachtung des echten
   Clients) wird weder beendet noch gesperrt, nur gemeldet. Ein Schalter für beides.
-- **Schritt 2 (15.11.2026): Der Dienst schreibt die Regeln, sperrt und gibt frei.** Noch nicht als Administrator
-  gelaufen; die Warnung „wird noch nicht angewendet“ aus Schritt 1 ist entfallen.
+- **Schritt 2 (15.11.2026): Der Dienst schreibt die Regeln, sperrt und gibt frei.** Abnahme am installierten Dienst
+  bestanden (siehe unten); die Warnung „wird noch nicht angewendet“ aus Schritt 1 ist entfallen.
   - *Zugriff auf die Firewall:* COM (`HNetCfg.FwPolicy2`) über `dynamic`, hinter der Schnittstelle `IFirewall`.
     Lesen geht für jeden Benutzer, Schreiben braucht Admin-Rechte oder `LocalSystem`. Eine vorhandene Regel wird an
     Ort und Stelle geändert, damit es keinen Moment ohne Regel gibt; die Beschreibung mit dem Fingerabdruck wird
@@ -634,8 +634,25 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     Firewall, Simulator und Freigabe in PowerShell 7 und 5.1: 20 von 20; die Fehlvariante „Firewall sperrt nichts“
     fällt mit 4 FAIL durch und räumt trotzdem auf. Der Trockenlauf fand einen Fehler im Skript (`$Port?` liest
     PowerShell 7 als Variablenname). Die beiden Testadressen sind von diesem Rechner aus erreichbar.
-  - *Nicht geprüft:* ob Windows die Regeln beim Speichern annimmt, ob sie den Client sperren, wie eine gesperrte
-    Verbindung beim Simulator ankommt (Fehler sofort oder Zeitüberschreitung), der Freigabe-Befehl als Administrator.
+  - *Lauf als Administrator (15.11.2026, 00:22): ALL PASSED, 20 von 20.* `prevention-test.ps1` am installierten
+    Dienst. Die Regel stand 0,6 s nach dem Start des Dienstes in der Firewall (5 Bereiche, Lücke bei `1.1.1.1`), die
+    erlaubte Adresse verband, die andere nicht. Nach `--spawn`: Kind und Client beendet, Regel auf `*` (00:22:47.331,
+    8 ms vor der Zeile des Befunds), `lockdown.json` mit dem Profil, auch die erlaubte Adresse gesperrt; nach dem
+    Neustart des Dienstes unverändert. `--release` als Administrator: Exit-Code 0, Regel zurück auf die Allowlist,
+    der laufende Dienst hat die Änderung unter einer Sekunde später bemerkt. Am Ende Konfiguration wie vorher, keine
+    Regel der Gruppe mehr. Eine gesperrte Verbindung kommt beim Simulator sofort als Fehler an („Der Zugriff auf
+    einen Socket war aufgrund der Zugriffsrechte des Sockets unzulässig“), nicht als Zeitüberschreitung.
+  - *Aus dem Lauf: Gesperrte Verbindungen erzeugen keinen Befund.* Abgleich der Prozess-IDs in `findings.db`: Die drei
+    Verbindungen, die durchgingen, hat Sysmon aufgezeichnet (alle drei als R2 gemeldet, eine davon 2,8 s nach dem
+    Verbindungsaufbau und deshalb erst nach einem Neustart des Dienstes gelesen); für die zwei Versuche zu einer
+    nicht erlaubten Adresse, die die Firewall gesperrt hat, gibt es kein Ereignis und keinen Befund. Zwei Versuche
+    sind kein Beweis, passen aber dazu, dass Sysmon nur zustande gekommene Verbindungen meldet. Folge: Mit
+    eingeschalteter Firewall sieht RCEGuard nicht, dass der Client eine fremde Adresse erreichen wollte, und
+    `killOnUnknownRemote` greift dann nie. Sichtbar machen ließe sich das über das Protokoll der Firewall
+    (Überwachungsereignis 5157 oder `pfirewall.log`, beides muss erst eingeschaltet werden). Nicht gebaut;
+    Entscheidung des Inhabers.
+  - *Nicht geprüft:* `uninstall.ps1` mit vorhandenen Regeln (`Remove-GuardFirewallRules`); das Verhalten mit dem
+    echten Client; Hostnamen im installierten Dienst (der Test nutzt nur eine Adresse).
   - *Grenzen:* Die Regel gilt für die Programmdatei des Clients, nicht für Programme, die er startet. Regeln werden
     über ihren Namen entfernt; eine fremde Regel mit genau dem Namen `RCEGuard: <Profil>` außerhalb der Gruppe könnte
     dabei statt der eigenen getroffen werden. Eine Sperre, die nicht in die Datei geschrieben werden konnte, endet

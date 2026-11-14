@@ -18,7 +18,7 @@ started under the name WowGuard.
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. A service that cannot start is removed again: `scripts\install-test.ps1` showed that on 2026-11-13 for a service build with a missing file and for a configuration that is not valid JSON (service, folder and event sources gone, sensor still there, nothing restarted by Windows), and a normal installation worked right after. **The same run ended with a half-removed Sysmon:** the Sysmon service crashed while `sysmon -u` was uninstalling it. A second `sysmon -u` could not finish the job either: the service that was left is protected by Windows and can only be removed by itself. `uninstall.ps1` now checks on the machine whether Sysmon is gone, tries once more, and for this dead end has the switch `-RemoveStuckSysmonService`. That way out worked on the test machine on 2026-11-14 (switch, restart of Windows, `uninstall.ps1` again): nothing of RCEGuard and Sysmon was left. Right after that `install-test.ps1` passed completely (2026-11-14 00:24, 21 of 21 checks): both failed starts, the installation without a fault, and the removal, this time without a crash of Sysmon. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
-| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. **Not yet run as administrator:** so far this is tested with a stand-in for Windows Firewall; whether Windows accepts the rules and whether they block is what `scripts\prevention-test.ps1` checks. Not built yet: Exploit Protection. Plan and decisions: `docs/KONZEPT.md` section 15 |
+| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. `scripts\prevention-test.ps1` passed on the installed service on 2026-11-15 (20 of 20 checks): Windows Firewall took the rule, the allowed address connected and the other one did not, the lockdown blocked everything and was still there after a restart of the service, `--release` ended it, and no rule was left at the end. **Seen in that run:** a connection the firewall blocks leaves no finding, see "Blocking in advance". Not verified: `uninstall.ps1` with rules in place; the real client. Not built yet: Exploit Protection. Plan and decisions: `docs/KONZEPT.md` section 15 |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
 
@@ -248,8 +248,9 @@ The guard stops with an error instead of idling if it cannot read the Sysmon log
 ### Blocking in advance (firewall and lockdown)
 
 Everything above reacts after the fact. Two switches make Windows Firewall block connections of
-the client before they happen. Both are off unless the configuration turns them on, and **neither
-has been run on a real system yet** (see the status table).
+the client before they happen. Both are off unless the configuration turns them on. Both were
+checked with the simulator on the installed service (see "Prevention test"), not yet with the
+real client.
 
 **`"firewall": true` on a profile.** The service keeps one outbound block rule for the client in
 Windows Firewall (name `RCEGuard: <profile>`, group `RCEGuard`). The rule names every address
@@ -270,6 +271,11 @@ an allow rule of its own.
   rules, the rule blocks nothing; the guard writes a warning to its log.
 - Only the client's own program file is covered. A program the client starts is not (R1
   terminates it; keeping it from starting is what Exploit Protection is for, not built yet).
+- **A blocked connection is not reported.** In the prevention test Sysmon recorded the
+  connections that went through and none of the two the firewall blocked, so there was no R2
+  finding for them: with the firewall on, RCEGuard does not show that the client tried to reach
+  an address that is not allowed. The simulator got the refusal at once ("access to a socket
+  forbidden by its access permissions"), without a wait.
 
 **`"lockdown": true` (kill switch).** After a finding that terminates the client, the profile is
 locked down: its rule blocks every outbound connection of the client, also to the allowed
@@ -373,7 +379,8 @@ program, the client is terminated and locked down, and not even the allowed addr
 also after a restart of the service; after `--release` the allowed address connects again; at
 the end the configuration is back as it was and no rule is left. Only the test client is ever
 blocked. The addresses are `1.1.1.1` and `1.0.0.1` on port 443 (`-AllowedAddress`,
-`-OtherAddress`, `-Port`). The result goes to `out\m3-result.txt`.
+`-OtherAddress`, `-Port`). The result goes to `out\m3-result.txt`. The service stays installed
+for the test client afterwards.
 
 ## Monitoring the real client
 
