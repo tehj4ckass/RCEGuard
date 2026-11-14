@@ -13,7 +13,8 @@
       A. install.ps1 with a published service that lacks a file: its process dies at once.
       B. install.ps1 with a configuration file that is not valid JSON: the service starts, reports
          that it cannot run, and ends.
-      C. install.ps1 without a fault: the service must run.
+      C. install.ps1 without a fault and with -BlockChildProcesses: the service must run, and
+         Exploit Protection must say that the client may not start other programs.
       D. uninstall.ps1: the machine must look as it did before step A.
 
     After A and B the service, its folder in Program Files and its event sources must be gone, the
@@ -73,6 +74,7 @@ if (-not $UninstallScript) { $UninstallScript = Join-Path $PSScriptRoot 'uninsta
 
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+. (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
 
 $servicesKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $sysmonServiceNames = @('Sysmon64', 'Sysmon', 'Sysmon64a')
@@ -94,6 +96,9 @@ function Test-MachineKey([string] $subKey) {
     }
     catch [System.Security.SecurityException] { return $true }   # there, but not to be read by this user
 }
+
+# The client this test installs for. Its Exploit Protection entry is one of the traces.
+$testClient = Join-Path $TestDir 'Wow.exe'
 
 function Get-InstallationTraces {
     <#
@@ -119,6 +124,7 @@ function Get-InstallationTraces {
     $found += , @('sensor', 'Sysmon event publisher', (Test-Path -LiteralPath $script:SysmonPublisherKey))
     $found += , @('sensor', 'Sysmon event channel', (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational'))
     $found += , @('sensor', 'Sysmon autologger entry', (Test-MachineKey $sysmonAutologgerSubKey))
+    $found += , @('sensor', "Exploit Protection entry for '$testClient'", (Test-ExploitProtectionEntry $testClient))
     $found += , @('sensor', 'Sysmon event log file', (Test-Path -LiteralPath $script:SysmonLogFile))
     $found += , @('sensor', 'Sysinternals licence note (this user)', (Test-Path -LiteralPath $script:SysmonEulaKey))
     $downloads = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'rceguard-sysmon-*' -ErrorAction SilentlyContinue)
@@ -188,10 +194,15 @@ function Add-Check([string] $step, [string] $check, [bool] $ok, [string] $value 
     $script:checks += [pscustomobject]@{ Step = $step; Check = $check; Value = $value; Result = $(if ($ok) { 'PASS' } else { 'FAIL' }) }
 }
 
-function Invoke-Install([string] $servicePath) {
+function Invoke-Install([string] $servicePath, [bool] $blockChildProcesses = $false) {
     # Returns the error message of install.ps1, or $null if it succeeded.
     try {
-        & $InstallScript -ClientPath $client -ServicePath $servicePath -DownloadSysmon -AcceptSysmonEula | Out-Host
+        if ($blockChildProcesses) {
+            & $InstallScript -ClientPath $client -ServicePath $servicePath -DownloadSysmon -AcceptSysmonEula -BlockChildProcesses | Out-Host
+        }
+        else {
+            & $InstallScript -ClientPath $client -ServicePath $servicePath -DownloadSysmon -AcceptSysmonEula | Out-Host
+        }
         return $null
     }
     catch {
@@ -260,14 +271,16 @@ try {
 
     # --- C. Without a fault -----------------------------------------------------------------------
     Write-Host ''
-    Write-Host 'C. Installing without a fault ...' -ForegroundColor Cyan
-    $message = Invoke-Install $ServicePath
+    Write-Host 'C. Installing without a fault, with -BlockChildProcesses ...' -ForegroundColor Cyan
+    $message = Invoke-Install $ServicePath $true
     Add-Message 'C: install.ps1' $message
     Add-Check 'C' 'install.ps1 succeeds after the failed attempts' (-not $message) (First-Line $message)
     $service = Get-GuardService
     $running = $null -ne $service -and $service.State -eq 'Running'
     Add-Check 'C' 'the service runs' $running $(if ($null -eq $service) { 'no such service' } else { "$($service.State), start mode $($service.StartMode), pid $($service.ProcessId)" })
     Add-Check 'C' 'the service starts with Windows' ($null -ne $service -and $service.StartMode -eq 'Auto') $(if ($null -ne $service) { $service.StartMode } else { '' })
+    $blockNow = Get-ChildProcessBlock $client
+    Add-Check 'C' 'Exploit Protection: the client may not start other programs' ($blockNow -eq 'ON') "DisallowChildProcessCreation: $blockNow"
 
     # --- D. Remove everything ---------------------------------------------------------------------
     Write-Host ''
@@ -276,6 +289,8 @@ try {
     try { & $UninstallScript | Out-Host } catch { $removeError = [string] $_.Exception.Message; Write-Host "uninstall.ps1 stopped: $removeError" -ForegroundColor DarkYellow }
     Add-Message 'D: uninstall.ps1' $removeError
     Add-Check 'D' 'uninstall.ps1 succeeds' (-not $removeError) (First-Line $removeError)
+    $blockNow = Get-ChildProcessBlock $client
+    Add-Check 'D' 'Exploit Protection: the setting is back to what it was' ($blockNow -eq 'NOTSET') "DisallowChildProcessCreation: $blockNow"
     $after = @(Get-InstallationTraces)
     $beforeNames = @(Get-PresentNames $before @('guard', 'data', 'sensor'))
     $afterNames = @(Get-PresentNames $after @('guard', 'data', 'sensor'))

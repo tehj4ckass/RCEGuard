@@ -8,7 +8,9 @@
       1. creates C:\ProgramData\RCEGuard, writable by administrators only,
       2. renders the Sysmon configuration for the given client,
       3. installs Sysmon with it, or loads it into a Sysmon that RCEGuard installed earlier,
-      4. copies the published guard service to C:\Program Files\RCEGuard and registers it as the
+      4. with -BlockChildProcesses: tells Windows Exploit Protection that the client may not
+         start other programs,
+      5. copies the published guard service to C:\Program Files\RCEGuard and registers it as the
          Windows service 'RCEGuard': LocalSystem, automatic start, depends on Sysmon, restarted by
          Windows after a failure. Publish the service first with '.\build.ps1 -Publish'.
 
@@ -37,6 +39,17 @@
 .PARAMETER SkipService
     Installs only the sensor. A guard service that is already installed is kept and restarted.
 
+.PARAMETER BlockChildProcesses
+    Turns on the Exploit Protection setting "Do not allow child processes" for the client: Windows
+    then refuses when the client tries to start another program. Off unless asked for, because it
+    can break things a client does on purpose (opening a link, a crash reporter, a launcher):
+    try the client with it before relying on it. It applies from the next start of the client.
+    Once turned on it stays on when the script is run again without the switch; turn it off with
+    -AllowChildProcesses. uninstall.ps1 puts the setting back as it was.
+
+.PARAMETER AllowChildProcesses
+    Takes back what -BlockChildProcesses did: the setting goes back to what it was before.
+
 .EXAMPLE
     .\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -DownloadSysmon -AcceptSysmonEula
 
@@ -52,7 +65,9 @@ param(
     [switch] $AcceptSysmonEula,
     [switch] $ReplaceExistingConfig,
     [string] $ServicePath,
-    [switch] $SkipService
+    [switch] $SkipService,
+    [switch] $BlockChildProcesses,
+    [switch] $AllowChildProcesses
 )
 
 Set-StrictMode -Version Latest
@@ -65,8 +80,12 @@ $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+. (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
 
 # Check this before anything on the machine is changed.
+if ($BlockChildProcesses -and $AllowChildProcesses) {
+    throw 'Use either -BlockChildProcesses or -AllowChildProcesses, not both.'
+}
 if (-not $SkipService) {
     # Not a param default: under 'powershell.exe -File' $PSScriptRoot is still empty in the param block.
     if (-not $ServicePath) { $ServicePath = Join-Path $PSScriptRoot '..\artifacts\service' }
@@ -190,7 +209,19 @@ else {
     Write-Host "Sysmon installed (service '$($installed.ServiceName)')."
 }
 
-# --- 4. Remember what was done, for uninstall.ps1 and for the service --------------------------
+# --- 4. Exploit Protection: the client may not start other programs ----------------------------
+# Without the switch the setting stays as the last run of this script left it.
+$blockWanted =
+    if ($BlockChildProcesses) { $true }
+    elseif ($AllowChildProcesses) { $false }
+    else { [bool] [string] (Get-StateValue $state 'childProcessBlockPath' '') }
+$block = Update-ChildProcessBlock `
+    ([string] (Get-StateValue $state 'childProcessBlockPath' '')) `
+    ([string] (Get-StateValue $state 'childProcessBlockBefore' 'NOTSET')) `
+    ([IO.Path]::GetFullPath($ClientPath)) `
+    $blockWanted
+
+# --- 5. Remember what was done, for uninstall.ps1 and for the service --------------------------
 # The service reads the client path from this file when it starts, so it is written first.
 $replaced = [bool] ($replacedForeignConfig -or ($null -ne $state -and $state.replacedForeignConfig))
 function Write-InstallState([bool] $serviceInstalled) {
@@ -203,6 +234,9 @@ function Write-InstallState([bool] $serviceInstalled) {
         sysmonEulaKeyCreated      = [bool] $sysmonEulaKeyCreated
         installedBySid            = [string] $installedBySid
         replacedForeignConfig     = $replaced
+        # The client RCEGuard turned "Do not allow child processes" on for ('' if none), and what the setting was before.
+        childProcessBlockPath     = [string] $block.Path
+        childProcessBlockBefore   = [string] $block.Before
         serviceInstalled          = $serviceInstalled
         updatedUtc                = (Get-Date).ToUniversalTime().ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
@@ -212,10 +246,15 @@ $existingService = Get-GuardService
 $serviceIsOurs = $null -ne $existingService -and (Test-GuardServiceIsOurs $existingService)
 Write-InstallState $serviceIsOurs
 
+if ($block.Problem) {
+    # After the state was written: it says how far the change got, so the next run and uninstall.ps1 can go on from there.
+    throw "The Exploit Protection setting could not be changed: $($block.Problem)`nThe sensor is installed; the guard service was not touched. Fix the cause and run install.ps1 again."
+}
+
 Write-Host ''
 Write-Host "RCEGuard sensor is active for '$([IO.Path]::GetFullPath($ClientPath))'."
 
-# --- 5. The guard service ----------------------------------------------------------------------
+# --- 6. The guard service ----------------------------------------------------------------------
 if (-not $SkipService) {
     Install-GuardService $ServicePath $installed.ServiceName $dataDir
     Write-InstallState $true

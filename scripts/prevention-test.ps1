@@ -16,7 +16,11 @@
          down, after which not even the allowed address connects, also after a restart of the service,
       6. releases the lockdown with 'RCEGuard.Service.exe --release' and checks that the allowed
          address connects again,
-      7. puts the configuration back as it was and checks that the rule is gone.
+      7. puts the configuration back as it was and checks that the rule is gone,
+      8. turns on "Do not allow child processes" for the test client with
+         'install.ps1 -BlockChildProcesses' and checks that the client still starts and connects,
+         that Windows refuses when it starts a program, and that the setting is gone again after
+         'install.ps1 -AllowChildProcesses'.
 
     Needs an administrator PowerShell and an internet connection. Publish the service first with
     '.\build.ps1 -Publish' and the simulator to the test folder (see README).
@@ -81,6 +85,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot '..\out' }
 
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+. (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
 
 $profileName = 'PreventionTest'
 $ruleName = "RCEGuard: $profileName"
@@ -127,6 +132,33 @@ function Invoke-Release {
     $ErrorActionPreference = 'Continue'   # 5.1 turns a line on stderr into an error under 'Stop'
     $lines = @(& $exe --release 2>&1 | ForEach-Object { "$_" })
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($lines -join "`n") }
+}
+
+function Set-TestBlock([bool] $on) {
+    # Turns "Do not allow child processes" on or off for the test client the way a user does: with install.ps1.
+    $install = Join-Path $PSScriptRoot 'install.ps1'
+    if ($on) { & $install -ClientPath $client -BlockChildProcesses | Out-Host }
+    else { & $install -ClientPath $client -AllowChildProcesses | Out-Host }
+}
+
+function Get-TestBlock {
+    Get-ChildProcessBlock $client
+}
+
+function Get-RefusedStartEvents([datetime] $since) {
+    # What Windows itself logged about program starts it refused (Exploit Protection, event 4), as text lines.
+    @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Security-Mitigations/KernelMode'; Id = 4; StartTime = $since } -ErrorAction SilentlyContinue |
+        Where-Object { $_.Message -match 'Wow\.exe' } |
+        ForEach-Object { (($_.Message -split "`r?`n")[0]).Trim() })
+}
+
+function Get-BlockRegistry {
+    # The entry Windows keeps for programs of the client's name (Image File Execution Options), as text lines.
+    $key = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\' + (Split-Path -Path $client -Leaf)
+    $ErrorActionPreference = 'Continue'   # 5.1 turns a line on stderr into an error under 'Stop'
+    $lines = @(& reg.exe query $key /s 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { return @('(no such key)') }
+    return $lines
 }
 
 # --- end of functions (the dry run puts its stand-ins here) ---
@@ -313,6 +345,67 @@ finally {
     }
 }
 
+# --- 7. Exploit Protection: the client may not start other programs --------------------------
+# After the firewall part, with the configuration from before the test (no lockdown).
+$notes = @()
+$blockChanged = $false
+if (-not $stopped) {
+    try {
+        Write-Host ''
+        Write-Host '7. Exploit Protection: the test client may not start other programs ...' -ForegroundColor Cyan
+        $blockBefore = Get-TestBlock
+        if ($blockBefore -ne 'NOTSET') {
+            throw "Exploit Protection already has a setting for child processes of '$client' ($blockBefore). The test needs a client without one."
+        }
+        $blockChanged = $true
+        Set-TestBlock $true
+        $blockNow = Get-TestBlock
+        Add-Check '7' 'install.ps1 -BlockChildProcesses turns the setting on' ($blockNow -eq 'ON') "DisallowChildProcessCreation: $blockNow"
+        $notes += 'Registry while the setting is on:'
+        $notes += @(Get-BlockRegistry | ForEach-Object { "    $_" })
+
+        # The simulator is a console program: Windows starts a console host for it. That must still work.
+        $try = Test-Connect $OtherAddress
+        Add-Check '7' 'the client still starts and connects' $try.Connected $try.Said
+
+        $offset = Get-FileLength $guardLog
+        $since = (Get-Date).AddSeconds(-2)
+        $spawn = Invoke-Client @('--spawn', '--hold', "$HoldSeconds")
+        $refusal = @($spawn.Output -split "`r?`n" | Where-Object { $_ -match 'was stopped:' })
+        $said = if ($refusal.Count -gt 0) { $refusal[0].Trim() } else { "exit code $($spawn.ExitCode): the program was started" }
+        if ($said.Length -gt 100) { $said = $said.Substring(0, 100) + '...' }
+        Add-Check '7' 'Windows refuses when the client starts a program' ($refusal.Count -gt 0) $said
+        Start-Sleep -Seconds 3
+        $r1 = @((Read-TextFrom $guardLog $offset) -split "`r?`n" | Where-Object { $_ -match '\bR1 CRITICAL \[' })
+        Add-Check '7' 'nothing was started, so the guard has no R1 finding' ($r1.Count -eq 0) "$($r1.Count) R1 CRITICAL line(s)"
+        $events = @(Get-RefusedStartEvents $since)
+        $notes += "Windows events about the refused start (Security-Mitigations/KernelMode, id 4): $($events.Count)"
+        $notes += @($events | Select-Object -First 2 | ForEach-Object { "    $_" })
+    }
+    catch {
+        $stopped = [string] $_.Exception.Message
+        Write-Host "The test stopped: $stopped" -ForegroundColor DarkYellow
+    }
+    finally {
+        if ($blockChanged) {
+            $backProblem = $null
+            try { Set-TestBlock $false } catch { $backProblem = [string] $_.Exception.Message }
+            $blockNow = Get-TestBlock
+            Add-Check '7' 'install.ps1 -AllowChildProcesses puts the setting back' (-not $backProblem -and $blockNow -eq 'NOTSET') $(if ($backProblem) { $backProblem } else { "DisallowChildProcessCreation: $blockNow" })
+            $notes += 'Registry after the setting was taken back:'
+            $notes += @(Get-BlockRegistry | ForEach-Object { "    $_" })
+            if (-not $backProblem) {
+                $offset = Get-FileLength $guardLog
+                $spawn = Invoke-Client @('--spawn', '--hold', "$HoldSeconds")
+                $terminated = $spawn.ExitCode -ne 0 -and $spawn.Output -notmatch 'NOT TERMINATED|was stopped:'
+                $null = Wait-Until { @((Read-TextFrom $guardLog $offset) -split "`r?`n" | Where-Object { $_ -match '\bR1 CRITICAL \[' }).Count -gt 0 } 6
+                $r1 = @((Read-TextFrom $guardLog $offset) -split "`r?`n" | Where-Object { $_ -match '\bR1 CRITICAL \[' })
+                Add-Check '7' 'without the setting the program starts and the guard terminates it' ($terminated -and $r1.Count -gt 0) "client $(if ($terminated) { 'terminated' } else { 'not terminated' }); $($r1.Count) R1 CRITICAL line(s)"
+            }
+        }
+    }
+}
+
 $failed = @($checks | Where-Object { $_.Result -eq 'FAIL' }).Count
 $verdict =
     if ($stopped) { "STOPPED: $stopped" }
@@ -327,6 +420,11 @@ $report = @(
     "Verdict: $verdict"
     "Guard log: $guardLog"
 )
+if ($notes.Count -gt 0) {
+    $report += ''
+    $report += 'Seen on the way (not checks):'
+    $report += $notes
+}
 [IO.File]::WriteAllLines($resultFile, [string[]] $report, [Text.UTF8Encoding]::new($false))
 Write-Host ''
 $report | ForEach-Object { Write-Host $_ }

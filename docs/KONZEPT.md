@@ -657,5 +657,44 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     über ihren Namen entfernt; eine fremde Regel mit genau dem Namen `RCEGuard: <Profil>` außerhalb der Gruppe könnte
     dabei statt der eigenen getroffen werden. Eine Sperre, die nicht in die Datei geschrieben werden konnte, endet
     mit dem nächsten Abgleich.
-- **Offen für Schritt 3:** ob `DisallowChildProcessCreation` den echten Client stört (Abschnitt 12) und ob der Simulator
-  als Konsolenprogramm damit noch startet (Windows erzeugt für ihn `conhost.exe`).
+- **Schritt 3 (15.11.2026): Exploit Protection.** Noch nicht als Administrator gelaufen.
+  - *Nur eine Einstellung:* „Do not allow child processes“ (`DisallowChildProcessCreation`) für den vollen Pfad des
+    Clients, über `Set-ProcessMitigation`. Abschnitt 5 nennt den Programmnamen (`-Name Wow.exe`); der würde jede
+    `Wow.exe` des Rechners treffen. Microsoft dokumentiert den vollen Pfad für genau diese Einstellung
+    („Customize exploit protection“). `ArbitraryCodeGuard` und `BlockDynamicCode` werden nie gesetzt (Warden).
+  - *In den Skripten, nicht im Dienst.* Die Einstellung ist eine einmalige Systemänderung, die Windows selbst
+    durchsetzt und die auch ohne laufenden Dienst gilt; `install.ps1` setzt sie, `uninstall.ps1` nimmt sie zurück
+    (harte Regel „alles ist rückbaubar“). Der Dienst müsste dafür PowerShell starten oder das Binärformat in der
+    Registry selbst schreiben. Folge: Sie gilt für den einen Client aus `-ClientPath`, nicht je Profil der
+    Konfiguration.
+  - *Schalter:* `install.ps1 -BlockChildProcesses` schaltet ein, `-AllowChildProcesses` nimmt zurück, ohne Schalter
+    bleibt es, wie der letzte Lauf es hinterlassen hat; wechselt `-ClientPath`, zieht die Einstellung mit. Zwei
+    Schalter statt `-BlockChildProcesses:$false`: Unter `powershell.exe -File` (5.1) kommt `:$false` als Text an
+    und der Aufruf scheitert (im Trockenlauf gesehen).
+  - *Rückbau auf den Stand von vorher.* Die Statusdatei merkt sich den Pfad und den Wert vor dem Einschalten
+    (`childProcessBlockPath`, `childProcessBlockBefore`): „nicht gesetzt“ wird wieder „nicht gesetzt“
+    (`-Remove -Disable`), ein erzwungenes „aus“ wieder „aus“. War die Einstellung schon an, bevor RCEGuard sie
+    anfasste, gehört sie nicht RCEGuard und bleibt, auch beim Entfernen. Nach jedem Setzen und Zurücknehmen wird
+    gelesen, ob es gewirkt hat; ein Befehl ohne Fehler und ohne Wirkung gilt als Fehlschlag.
+  - *Scheitert das Ändern,* schreibt `install.ps1` erst die Statusdatei (sie sagt, wie weit es kam) und bricht dann
+    ab, bevor der Dienst angefasst wird. `uninstall.ps1` warnt in dem Fall mit dem Befehl für die Hand und räumt
+    den Rest trotzdem ab: Sonst bliebe wegen einer Einstellung alles installiert.
+  - *Standard aus,* wie alles in M3, hier zusätzlich wegen Abschnitt 12: Ob der echte Client damit startet, sich
+    anmeldet und patcht, ist nicht geprüft.
+  - *Ein abgewiesener Start ist kein Befund.* Es entsteht kein Prozess, also kein Sysmon-Ereignis. Windows
+    protokolliert ihn selbst (`Microsoft-Windows-Security-Mitigations/KernelMode`, Ereignis 4, Audit-Modus
+    Ereignis 3); das Log ist auf dem Testrechner ohne Admin-Rechte lesbar. Es zu lesen und als Befund zu melden
+    ist dieselbe Frage wie bei gesperrten Verbindungen (Schritt 2) und nicht gebaut; Entscheidung des Inhabers.
+  - *Geprüft, alles mit Stellvertretern für `Get-`/`Set-ProcessMitigation`, in PowerShell 7 und 5.1:* die
+    Entscheidungslogik (`Update-ChildProcessBlock`, 13 Fälle: erstmals, erneut, von Hand entfernt, zurücknehmen,
+    anderer Client, schon fremd gesetzt, vorher „aus“, Fehlschläge, Befehl ohne Wirkung); eine Kopie von
+    `install.ps1` mit einer Statusdatei im alten Format (6 Läufe); `uninstall.ps1` (nimmt zurück, ein zweiter Lauf
+    nicht noch einmal); `prevention-test.ps1` mit dem neuen Teil (26 von 26, Fehlvariante 6 FAIL). Echt gelesen,
+    ohne Admin-Rechte: Ein Programm ohne Eintrag liest sich als „nicht gesetzt“, ein vorhandener Eintrag nach
+    Programmname (`excel.exe`) wird gelesen, ein erfundener Name ergibt nichts.
+  - *Nicht geprüft:* ob `Set-ProcessMitigation` den vollen Pfad auf diesem Windows annimmt und
+    `Get-ProcessMitigation` ihn danach liest (auf dem Rechner gibt es keinen Eintrag mit Pfad zum Nachsehen); ob
+    der Simulator als Konsolenprogramm mit der Einstellung noch startet (Windows erzeugt für ihn `conhost.exe`;
+    nach einer Beschreibung des Mechanismus entsteht der im Kernel und fällt nicht unter die Sperre); wie die
+    Abweisung beim Simulator ankommt; ob nach dem Zurücknehmen ein leerer Eintrag in der Registry bleibt
+    (`prevention-test.ps1` schreibt den Registry-Stand vorher und nachher in die Ergebnisdatei); der echte Client.

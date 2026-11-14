@@ -7,6 +7,8 @@
     First stops and removes the Windows service 'RCEGuard', C:\Program Files\RCEGuard and the
     registrations of the service as a source of the Windows Application log.
     Then uses C:\ProgramData\RCEGuard\install-state.json written by install.ps1:
+      - If install.ps1 -BlockChildProcesses turned on the Exploit Protection setting "Do not
+        allow child processes" for the client, the setting is put back to what it was before.
       - Sysmon is uninstalled only if RCEGuard installed it. What Sysmon leaves behind then goes
         too, if the installation brought it: the file of its event log (everything it recorded)
         and the note in the registry that the Sysinternals licence was accepted.
@@ -53,6 +55,7 @@ function Add-UninstallLog([string[]] $lines) {
 
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
+. (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
 
 # The guard service goes first: it depends on Sysmon and keeps files in the data folder open.
 # It is removed even without a state file, so a broken installation can always be cleaned up.
@@ -72,6 +75,25 @@ if (-not (Test-Path -LiteralPath $statePath)) {
 }
 
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+
+# Exploit Protection: back to what it was before install.ps1 -BlockChildProcesses.
+$blockPath = [string] (Get-StateValue $state 'childProcessBlockPath' '')
+if ($blockPath) {
+    $blockBefore = [string] (Get-StateValue $state 'childProcessBlockBefore' 'NOTSET')
+    try {
+        # Not again if an earlier run of this script, one that stopped later on, has done it already.
+        if ((Get-ChildProcessBlock $blockPath) -eq 'ON') {
+            Restore-ChildProcessBlock $blockPath $blockBefore
+            Write-Host "Exploit Protection: '$blockPath' may start other programs again (setting back to '$blockBefore')."
+        }
+    }
+    catch {
+        # Not a reason to leave the rest installed: the setting is one command away, and this warning names it.
+        Write-Warning "The Exploit Protection setting of '$blockPath' could not be put back: $($_.Exception.Message)"
+        Write-Warning "The client still may not start other programs. To change that by hand, run as administrator: Set-ProcessMitigation -Name '$blockPath' -Remove -Disable $script:ChildProcessMitigation"
+    }
+}
+
 $sysmonExe = $state.sysmonExe
 $sysmonPresent = $sysmonExe -and (Test-Path -LiteralPath $sysmonExe -PathType Leaf)
 
