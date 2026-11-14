@@ -556,3 +556,46 @@ Alle Szenarien des Simulators wurden aufgezeichnet (R1, R2, R3, R4). Für die Re
 - **Offen in M2:** Verhalten nach dem Aufwachen aus dem Ruhezustand; Entscheidung des Inhabers, ob der Dienst
   weiter ins Windows-Anwendungslog schreibt. Die Selbstprüfung gegen ein stummes Abo hat im echten Dienst noch nie ausgelöst (das Abo liefert);
   sie ist nur in den Tests mit einem stummen Ersatz-Abo geprüft.
+
+## 15. Entscheidungen bei der Umsetzung von M3
+
+**Schritte.** (1) Firewall-Regeln berechnen und Konfiguration, im Kern, ohne Betriebssystem. (2) Der Dienst schreibt die
+Regeln in die Windows-Firewall, hält sie aktuell, sperrt nach einem Befund mit Beenden und gibt wieder frei; `uninstall.ps1`
+entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in `install.ps1` und `uninstall.ps1`.
+(4) Abnahme mit dem Simulator als Administrator.
+
+- **Schritt 1 (15.11.2026): Regeln berechnen.** `RCEGuard.Core/Prevention`.
+  - *Eine Sperr-Regel je Profil, mit dem Komplement der Allowlist.* Abschnitt 5 lässt die Umsetzung offen („Block
+    schlägt Allow“). Gewählt ist: Die Regel sperrt ausgehende Verbindungen des Clients zu allen Adressen, die nicht
+    erlaubt sind (`AddressBlocks.Outside`), als möglichst wenige Bereiche „von-bis“ für IPv4 und IPv6. Was keine
+    Regel sperrt, lässt die Firewall in der Standardeinstellung durch; RCEGuard legt keine Allow-Regeln an und ändert
+    die Standardrichtlinie nicht. Loopback (`127.0.0.0/8`, `::1`) ist nie gesperrt, wie bei R2. Erlaubt sind die
+    Einträge aus `allowedRemote` und die Adressen, zu denen `allowedHostnames` gerade auflösen.
+  - *Fail closed.* Lösen die Hostnamen eines Profils nicht auf und nennt es keine Adressen, sperrt die Regel alles
+    außer Loopback. Ein Profil mit `firewall`, das weder Adressen noch Hostnamen nennt, ist ein Konfigurationsfehler.
+  - *Sperre (Kill-Switch).* Ein gesperrtes Profil bekommt dieselbe Regel mit Adresse `*` (alles), unabhängig davon,
+    ob seine Firewall eingeschaltet ist.
+  - *Wiedererkennen.* Alle Regeln tragen die Gruppe `RCEGuard` und heißen `RCEGuard: <Profilname>`. Die Beschreibung
+    endet mit einem Fingerabdruck aus Pfad und Adressen: Stimmt die Beschreibung einer vorhandenen Regel, ist es die
+    gewünschte Regel und muss nicht neu geschrieben werden. Profilnamen müssen deshalb eindeutig sein und dürfen kein
+    `|` enthalten (das nimmt die Firewall in Regelnamen nicht); beides prüft die Konfiguration jetzt.
+  - *Geprüft an der Windows-Firewall, ohne etwas zu ändern (COM-Objekt `HNetCfg.FWRule`, nicht gespeichert):* Die
+    berechneten Adresslisten werden angenommen und unverändert zurückgegeben, auch IPv6-Bereiche ab `::` und einzelne
+    Adressen als „a-a“ (eine einzelne IPv4-Adresse ohne Bereich käme als `a/255.255.255.255` zurück). Eine Regel nimmt
+    2000 Bereiche. Die Richtlinie ist ohne Admin-Rechte lesbar: Firewall in allen Profilen an, ausgehend „zulassen“.
+    Das Objekt prüft nur die Schreibweise; ob die Firewall die Regel beim Speichern annimmt, zeigt erst Schritt 2.
+- **Alles in M3 ist zunächst abgeschaltet und wird je Konfiguration eingeschaltet** (`"firewall": true` am Profil,
+  `"lockdown": true` global). Das weicht von Abschnitt 5 ab, wo der Kill-Switch Standard ist. Grund: Eine Firewall-Regel
+  mit unvollständiger Allowlist und eine Sperre machen den Client stumm, und bis zur Tray-App (M4) steht der Grund nur
+  in `guard.log`; freigeben kann bis dahin nur ein Administrator auf der Kommandozeile. Was der Standard wird, wenn die
+  Tray-App da ist, entscheidet der Inhaber.
+- **Die Sperre hängt an `killEnabled`.** Mit `killEnabled: false` (empfohlen für die erste Beobachtung des echten
+  Clients) wird weder beendet noch gesperrt, nur gemeldet. Ein Schalter für beides.
+- **Bis Schritt 2 wird nichts angewendet.** Der Dienst meldet beim Start eine Warnung, wenn die Konfiguration `firewall`
+  oder `lockdown` einschaltet, damit niemand eine Sperre für wirksam hält, die es noch nicht gibt.
+- **Offen für Schritt 2:** Hostnamen, die beim Start nicht auflösen (kein Netz), dürfen den Client nicht zehn Minuten
+  sperren: schneller neu auflösen, solange etwas fehlt. Prüfen, ob die Firewall überhaupt aktiv ist und ob lokale
+  Regeln gelten (Gruppenrichtlinie); sonst sichtbar warnen. Die Freigabe ohne Tray-App: als Befehl des Dienstprogramms
+  für einen Administrator.
+- **Offen für Schritt 3:** ob `DisallowChildProcessCreation` den echten Client stört (Abschnitt 12) und ob der Simulator
+  als Konsolenprogramm damit noch startet (Windows erzeugt für ihn `conhost.exe`).

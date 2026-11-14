@@ -20,6 +20,13 @@ public sealed record GuardConfig
     /// never held back.
     /// </summary>
     public int RepeatWindowSeconds { get; init; } = 300;
+
+    /// <summary>
+    /// If true, a finding that terminates a client also puts its profile in lockdown: Windows
+    /// Firewall blocks every outbound connection of the client until the lockdown is released.
+    /// Off by default. Like terminating, it does not happen while <see cref="KillEnabled"/> is false.
+    /// </summary>
+    public bool Lockdown { get; init; }
 }
 
 /// <summary>One watched game client and the server it is allowed to talk to.</summary>
@@ -39,6 +46,13 @@ public sealed record ClientProfile
 
     /// <summary>If true, a connection to an unknown address also terminates the client (R2).</summary>
     public bool KillOnUnknownRemote { get; init; }
+
+    /// <summary>
+    /// If true, Windows Firewall blocks outbound connections of the client to every address that
+    /// is neither in <see cref="AllowedRemote"/> nor an address of <see cref="AllowedHostnames"/>.
+    /// Off by default. Needs at least one allowed address or host name.
+    /// </summary>
+    public bool Firewall { get; init; }
 
     /// <summary>Folder of the client with a trailing backslash.</summary>
     public string GameDirectory
@@ -97,11 +111,24 @@ public static class GuardConfigJson
         }
 
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var profile in config.Profiles)
         {
             if (string.IsNullOrWhiteSpace(profile.Name))
             {
                 throw new FormatException("A profile has no name.");
+            }
+
+            // The name identifies the profile: in the findings, for the resolved host names and in
+            // the name of its firewall rule. Windows Firewall does not take '|' in a rule name.
+            if (!seenNames.Add(profile.Name))
+            {
+                throw new FormatException($"The profile name '{profile.Name}' is used by more than one profile.");
+            }
+
+            if (profile.Name.Contains('|'))
+            {
+                throw new FormatException($"Profile '{profile.Name}': the name must not contain '|'.");
             }
 
             // Not Path.IsPathRooted: the core also runs its tests on non-Windows machines.
@@ -123,6 +150,12 @@ public static class GuardConfigJson
                 {
                     throw new FormatException($"Profile '{profile.Name}': '{entry}' is not an IP address or CIDR range.");
                 }
+            }
+
+            if (profile.Firewall && (profile.AllowedRemote ?? []).Count == 0 && (profile.AllowedHostnames ?? []).Count == 0)
+            {
+                throw new FormatException(
+                    $"Profile '{profile.Name}': firewall is on, but neither allowedRemote nor allowedHostnames names an address. That would block every connection of the client.");
             }
         }
     }

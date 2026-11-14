@@ -109,6 +109,13 @@ public sealed class GuardWorker : BackgroundService
 
         logger.LogInformation("Configuration from {Source}; terminating processes is {State}", configSource, killEnabled ? "ON" : "OFF (dry run)");
 
+        // Not silently: someone who turned prevention on must not believe it is in place.
+        if (config.Lockdown || config.Profiles.Any(profile => profile.Firewall))
+        {
+            logger.LogWarning(
+                "The configuration turns on 'firewall' or 'lockdown'. This build does not apply firewall rules yet: nothing is blocked");
+        }
+
         if (options.ReplayPath is not null)
         {
             Replay(options.ReplayPath, engine, store);
