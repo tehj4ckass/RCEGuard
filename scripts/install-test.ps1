@@ -141,36 +141,6 @@ function Get-InstallationTraces {
     }
 }
 
-function Test-ProcessElevated([int] $processId) {
-    <#
-        $true if the process runs with administrator rights (an elevated token), $false if not,
-        $null if that cannot be found out. Asks Windows about the token of the process; nothing
-        of the process itself is read.
-    #>
-    if (-not ('RceGuardTest.Token' -as [type])) {
-        Add-Type -Namespace RceGuardTest -Name Token -MemberDefinition @'
-[DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
-[DllImport("advapi32.dll", SetLastError = true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
-[DllImport("advapi32.dll", SetLastError = true)] public static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
-[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
-'@
-    }
-    $process = [RceGuardTest.Token]::OpenProcess(0x1000, $false, $processId)   # PROCESS_QUERY_LIMITED_INFORMATION
-    if ($process -eq [IntPtr]::Zero) { return $null }
-    try {
-        $token = [IntPtr]::Zero
-        if (-not [RceGuardTest.Token]::OpenProcessToken($process, 0x8, [ref] $token)) { return $null }   # TOKEN_QUERY
-        try {
-            $elevated = 0
-            $returned = 0
-            if (-not [RceGuardTest.Token]::GetTokenInformation($token, 20, [ref] $elevated, 4, [ref] $returned)) { return $null }   # TokenElevation
-            return ($elevated -ne 0)
-        }
-        finally { $null = [RceGuardTest.Token]::CloseHandle($token) }
-    }
-    finally { $null = [RceGuardTest.Token]::CloseHandle($process) }
-}
-
 function Get-PresentNames([object[]] $traces, [string[]] $groups) {
     @($traces | Where-Object { $_.Present -and $_.Group -in $groups } | ForEach-Object { $_.Name })
 }

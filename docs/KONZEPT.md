@@ -939,3 +939,31 @@ der Tray-App. (4) Abnahme.
   - *Ein Test ist einmal durchgefallen und ließ sich nicht wiederholen.* In einem Lauf von `build.ps1 -Publish`
     meldete die Dienst-Suite 80 von 81; welcher Test es war, ging in meiner gefilterten Ausgabe verloren. 17 weitere
     Läufe der ganzen Suite danach bestanden alle. Nicht geklärt.
+- **Schritt 4 (15.11.2026): Abnahme der Freigabe aus dem Fenster (`scripts\tray-test.ps1`).** Noch nicht als
+  Administrator gelaufen.
+  - *Warum ein eigenes Skript mit einem Menschen am Bildschirm:* Die Freigabe besteht aus einem Klick im Fenster und
+    der Admin-Abfrage von Windows. Beides bedient das Skript nicht (keine Fernsteuerung der Oberfläche, und die
+    Admin-Abfrage soll ein Mensch beantworten). Es stellt den Zustand her, wartet und prüft danach.
+  - *Ablauf:* installieren (wie `prevention-test.ps1`), prüfen, dass die Tray-App ohne Admin-Rechte läuft;
+    Konfiguration mit `lockdown: true` für den Testclient (Profil `TrayTest`), Simulator `--spawn --hold`: Client
+    beendet, Profil gesperrt; bis zu 180 s warten, bis `lockdown.json` leer ist; danach: keine Firewall-Regel mehr,
+    der laufende Dienst hat die Freigabe bemerkt, der Client startet wieder. Am Ende die Konfiguration von vorher;
+    hat niemand freigegeben, gibt das Skript selbst frei, und der Test ist durchgefallen.
+  - *Wer hat freigegeben:* Eine leere `lockdown.json` belegt nicht, dass die Tray-App es war. Das Skript sieht
+    deshalb während des Wartens alle 100 ms nach einem laufenden `RCEGuard.Service.exe --release` und notiert den
+    Namen des Elternprozesses; verlangt ist `RCEGuard.Tray`. Ein Blick dauert auf dem Testrechner rund 70 ms
+    (gemessen ohne Admin-Rechte). Annahme, nicht geprüft: Windows trägt bei einem Start mit Admin-Abfrage das
+    aufrufende Programm als Elternprozess ein, und der Freigabe-Befehl läuft lang genug, um gesehen zu werden.
+    Trifft eines davon nicht zu, fällt genau diese Prüfung durch, obwohl die Freigabe ging; der Wert in der
+    Ergebnisdatei sagt dann, was gesehen wurde.
+  - `Test-ProcessElevated` liegt jetzt in `TrayTools.ps1` (vorher in `install-test.ps1`), weil beide Tests es
+    brauchen.
+  - *Geprüft, mit Stellvertretern in PowerShell 7 und 5.1* (Dienst, Tray-App, Simulator und der Mensch am Bildschirm
+    ersetzt; Datenordner in TEMP): Freigabe über die Tray-App (ALL PASSED), Freigabe von Hand in einer Konsole
+    (nur die Prüfung „von der Tray-App gestartet“ fällt durch), niemand gibt frei (Warten läuft ab, das Skript gibt
+    frei und stellt die Konfiguration wieder her, durchgefallen), Tray-App mit Admin-Rechten (durchgefallen). In
+    allen Fällen war die Konfiguration danach die von vorher und keine Sicherung übrig. Echt und ohne Admin-Rechte:
+    die laufende Tray-App wird gefunden und als nicht erhöht erkannt; `install-test.ps1 -ListOnly` läuft nach dem
+    Verschieben der Funktion in beiden Versionen.
+  - *Nicht geprüft:* alles, was die Stellvertreter ersetzen, also der Klick, die Admin-Abfrage, der Freigabe-Befehl
+    aus der Tray-App und das Erkennen seines Elternprozesses.
