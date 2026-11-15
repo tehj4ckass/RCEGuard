@@ -1296,7 +1296,7 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     hat; sehr kurze Verbindungen fängt weiter nur Sysmon. Beide Quellen zusammen deckten ab, was eine allein
     auslässt.
 - **Gebaut (15.11.2026): die Verbindungstabelle von Windows als zweite Quelle.** Entscheidung des Inhabers nach der
-  Messung. Nicht am installierten Dienst gelaufen.
+  Messung. Am installierten Dienst gemessen (21:53), siehe unten.
   - *Lesen (`TcpConnections`, Dienst):* `GetExtendedTcpTable` für IPv4 und IPv6 mit der PID des Besitzers, also
     die Liste von `netstat -o`. Kein Prozess wird dafür geöffnet. Aus den Zeilen eines Clients zählen nur
     Verbindungen, die er selbst aufgebaut hat: keine lauschenden Sockets, keine auf einem eigenen lauschenden Port
@@ -1333,3 +1333,23 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
   - *Nicht geprüft:* der installierte Dienst (liest er als LocalSystem dieselbe Tabelle, findet er die Verbindung
     eines fremden Prozesses rechtzeitig); die Last durch das Abfragen alle 2 s ist nicht gemessen, nur geschätzt
     (zwei Systemaufrufe über einige hundert Zeilen).
+  - *Lauf als Administrator am installierten Dienst (15.11.2026, 21:49 bis 21:53), `sensor-probe.ps1 -Install`:*
+
+    | Art | Sysmon aufgezeichnet | Wächter gesehen | davon nur über die Tabelle |
+    | :--- | :--- | :--- | :--- |
+    | sofort geschlossen | 9 von 10 | 9 von 10 | 0 |
+    | 12 s offen gehalten | 7 von 10 | 10 von 10 | 3 |
+
+    - *Die zweite Quelle tut am installierten Dienst, was sie soll:* Alle drei offen gehaltenen Verbindungen, die
+      Sysmon verpasst hat, hat der Dienst (als LocalSystem) in der Tabelle gefunden, 7,0 bis 8,6 s nach dem Start
+      des Clients, und im Lernmodus notiert. Nichts wurde doppelt gemeldet: 19 Meldungen des Wächters, 16 aus Sysmon
+      und 3 aus der Tabelle.
+    - *Wie erwartet offen:* Die eine sofort geschlossene Verbindung, die Sysmon verpasst hat, hat niemand gesehen.
+    - *Sysmon über alle vier Läufe des Tages:* 40 von 54 Verbindungen aufgezeichnet. Die Ursache der Ausfälle ist
+      weiter ungeklärt.
+    - *Nebenbei:* `9.9.9.9` und `8.8.8.8` schließen eine stumme Verbindung von sich aus irgendwann zwischen 8 s und
+      12 s, `1.1.1.1` nicht. Für die Messung egal: Gefunden wurden die Verbindungen vorher.
+    - *Zustand danach nachgesehen:* Dienst (Stand 21:41) und Sysmon laufen, Konfiguration und Notizen wie vor der
+      Messung, keine Regel, keine Sperre. Keine Warnung des Dienstes zur Tabelle im Log.
+    - *Weiter nicht geprüft:* der echte Client (seine Verbindungen stehen lange; ob der Dienst sie über Sysmon oder
+      über die Tabelle sieht, zeigt die erste Sitzung im Lernmodus); die Last durch das Abfragen.
