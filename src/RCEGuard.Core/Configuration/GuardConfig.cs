@@ -73,6 +73,13 @@ public sealed record ClientProfile
     /// <summary>Host names whose addresses are allowed; the service resolves them periodically.</summary>
     public IReadOnlyList<string> AllowedHostnames { get; init; } = [];
 
+    /// <summary>
+    /// Full paths of other programs the client may open to look at them (R7): asking about them or
+    /// reading their memory is then not recorded. Opening a program with rights to change it is
+    /// reported whether it is listed or not.
+    /// </summary>
+    public IReadOnlyList<string> AllowedProcessAccess { get; init; } = [];
+
     /// <summary>If true, a connection to an unknown address also terminates the client (R2).</summary>
     public bool KillOnUnknownRemote { get; init; }
 
@@ -197,6 +204,15 @@ public static class GuardConfigJson
                 if (!RemoteAllowlist.TryParseRange(entry, out _))
                 {
                     throw new FormatException($"Profile '{profile.Name}': '{entry}' is not an IP address or CIDR range.");
+                }
+            }
+
+            foreach (var entry in profile.AllowedProcessAccess ?? [])
+            {
+                // A name alone would also match a program of that name anywhere, e.g. in a download folder.
+                if (entry is null || entry.Length < 4 || !char.IsAsciiLetter(entry[0]) || entry[1] != ':' || entry[2] != '\\')
+                {
+                    throw new FormatException($"Profile '{profile.Name}': allowedProcessAccess takes full paths of programs, got '{entry}'.");
                 }
             }
 

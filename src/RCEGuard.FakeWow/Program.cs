@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace RCEGuard.FakeWow;
@@ -7,7 +9,8 @@ namespace RCEGuard.FakeWow;
 /// <summary>
 /// Simulator for RCEGuard: runs under the name Wow.exe and triggers, one per switch, the
 /// behaviour a detection rule looks for. Everything it does is harmless and is undone
-/// before it exits. It contains no exploit and touches no other process.
+/// before it exits. It contains no exploit and changes no other process: the one scenario that
+/// is about another process (--open-process) only asks Windows for a handle and closes it again.
 /// </summary>
 internal static class Program
 {
@@ -98,6 +101,9 @@ internal static class Program
                 case "--detach":
                     Detach();
                     break;
+                case "--open-process":
+                    OpenOtherProcess(args.Length > 1 ? args[1] : "read");
+                    break;
                 default:
                     Console.Error.WriteLine($"Unknown scenario '{args[0]}'.");
                     PrintUsage();
@@ -128,6 +134,9 @@ internal static class Program
               --miner-args            child with 'stratum+tcp://' argument -> R9 miner command line
               --detach                child that leaves a waiting program behind and exits
                                       (runs on for about 5 s)             -> R1, left-behind program
+              --open-process [rights] ask for a handle to the Explorer of this session and close it
+                                      again; rights: query, read (default), write. Nothing is read
+                                      or written                          -> R7 other program opened
 
             Add '--hold [seconds]' (default 15) after a scenario to keep this process, and for
             --spawn its child and for --detach the left-behind program, running: a guard then has
@@ -176,6 +185,53 @@ internal static class Program
         child.WaitForExit();
         Console.WriteLine($"Child {child.Id} exited with code {child.ExitCode}.");
     }
+
+    /// <summary>
+    /// Asks Windows for a handle to another process and closes it at once. Only the request is what
+    /// the sensor records; the handle is never used, so nothing of the other process is read or changed.
+    /// </summary>
+    private static void OpenOtherProcess(string rights)
+    {
+        // PROCESS_QUERY_LIMITED_INFORMATION, plus PROCESS_VM_READ, plus what writing and starting a
+        // thread would need (PROCESS_CREATE_THREAD, PROCESS_VM_OPERATION, PROCESS_VM_WRITE).
+        var mask = rights switch
+        {
+            "query" => 0x1000u,
+            "read" => 0x1010u,
+            "write" => 0x102Au,
+            _ => throw new ArgumentException($"Expected query, read or write, got '{rights}'."),
+        };
+
+        using var self = Process.GetCurrentProcess();
+        var explorers = Process.GetProcessesByName("explorer");
+        try
+        {
+            var target = explorers.FirstOrDefault(process => process.SessionId == self.SessionId)
+                ?? throw new InvalidOperationException("No explorer.exe runs in this session.");
+            var handle = OpenProcess(mask, inheritHandle: false, target.Id);
+            if (handle == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            CloseHandle(handle);
+            Console.WriteLine($"R7: asked for a handle to explorer.exe ({target.Id}) with rights 0x{mask:x} ({rights}) and closed it again.");
+        }
+        finally
+        {
+            foreach (var process in explorers)
+            {
+                process.Dispose();
+            }
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, int processId);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     private static void Connect(string endpoint)
     {

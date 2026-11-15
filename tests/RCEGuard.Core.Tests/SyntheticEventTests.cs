@@ -223,6 +223,87 @@ public class SyntheticEventTests
         Assert.Equal(expected, RegistryRules.Classify(key, eventType));
     }
 
+    // --- R7 ------------------------------------------------------------------------------------
+    private const string Explorer = @"C:\WINDOWS\Explorer.EXE";
+
+    private static SysmonEvent Access(string access, string target = Explorer, string targetGuid = "{22222222-0000-0000-0000-000000000002}") => TestData.Event(
+        SysmonEventIds.ProcessAccess,
+        ("SourceImage", Client),
+        ("SourceProcessId", "100"),
+        ("SourceProcessGUID", "{22222222-0000-0000-0000-000000000001}"),
+        ("TargetImage", target),
+        ("TargetProcessGUID", targetGuid),
+        ("GrantedAccess", access));
+
+    [Theory]
+    [InlineData("0x1000", Severity.Info, FindingAction.Log, "opened another program (0x1000)")]                 // ask about it
+    [InlineData("0x100000", Severity.Info, FindingAction.Log, "opened another program (0x100000)")]             // wait for it
+    [InlineData("0x1410", Severity.Medium, FindingAction.Log, "to read its memory (0x1410)")]                   // what a scan needs
+    [InlineData("0x0010", Severity.Medium, FindingAction.Log, "to read its memory (0x0010)")]
+    [InlineData("0x0020", Severity.High, FindingAction.Alert, "with rights to change it (0x0020")]              // write memory
+    [InlineData("0x0002", Severity.High, FindingAction.Alert, "with rights to change it (0x0002")]              // start a thread
+    [InlineData("0x0008", Severity.High, FindingAction.Alert, "with rights to change it (0x0008")]              // change memory protection
+    [InlineData("0x1F0FFF", Severity.High, FindingAction.Alert, "with rights to change it (0x1F0FFF")]          // all access (before Vista)
+    [InlineData("0x1fffff", Severity.High, FindingAction.Alert, "with rights to change it (0x1fffff")]          // all access
+    [InlineData("", Severity.High, FindingAction.Alert, "could not be read ('')")]                              // fail closed
+    [InlineData("1410", Severity.High, FindingAction.Alert, "could not be read ('1410')")]
+    [InlineData("0xZZ", Severity.High, FindingAction.Alert, "could not be read ('0xZZ')")]
+    [InlineData("0x0", Severity.High, FindingAction.Alert, "could not be read ('0x0')")]
+    public void R7_is_judged_by_what_the_access_rights_allow(string access, Severity severity, FindingAction action, string summaryPart)
+    {
+        var finding = Assert.Single(TestData.Engine().Evaluate(Access(access)));
+
+        Assert.Equal(("R7", severity, action), (finding.RuleId, finding.Severity, finding.Action));
+        Assert.Contains(summaryPart, finding.Summary);
+        Assert.Equal(Explorer, finding.Target);
+        Assert.Empty(finding.KillTargets);   // R7 never terminates: asking for a handle changes nothing yet
+    }
+
+    [Theory]
+    [InlineData("0x1000")]
+    [InlineData("0x1410")]
+    public void R7_looking_at_a_listed_program_is_expected(string access)
+    {
+        var engine = TestData.Engine(TestData.Profile() with { AllowedProcessAccess = [@"c:\windows\explorer.exe"] });
+
+        Assert.Empty(engine.Evaluate(Access(access)));
+        Assert.Single(engine.Evaluate(Access(access, target: @"C:\Windows\System32\lsass.exe")));   // another program is not covered
+    }
+
+    [Theory]
+    [InlineData("0x1fffff")]
+    [InlineData("0x0020")]
+    [InlineData("garbage")]
+    public void R7_rights_to_change_a_program_alert_even_if_it_is_listed(string access)
+    {
+        var engine = TestData.Engine(TestData.Profile() with { AllowedProcessAccess = [Explorer] });
+
+        var finding = Assert.Single(engine.Evaluate(Access(access)));
+
+        Assert.Equal((Severity.High, FindingAction.Alert), (finding.Severity, finding.Action));
+    }
+
+    [Fact]
+    public void R7_the_client_opening_itself_is_nothing()
+    {
+        Assert.Empty(TestData.Engine().Evaluate(Access("0x1fffff", target: Client, targetGuid: "{22222222-0000-0000-0000-000000000001}")));
+        // Another process running the same program (a second client) is another process.
+        Assert.Single(TestData.Engine().Evaluate(Access("0x1fffff", target: Client)));
+    }
+
+    [Theory]
+    [InlineData("explorer.exe")]
+    [InlineData(@"\Windows\explorer.exe")]
+    [InlineData("")]
+    public void AllowedProcessAccess_takes_full_paths_only(string entry)
+    {
+        var config = new RCEGuard.Core.Configuration.GuardConfig { Profiles = [TestData.Profile() with { AllowedProcessAccess = [entry] }] };
+
+        var error = Assert.Throws<FormatException>(() => RCEGuard.Core.Configuration.GuardConfigJson.Validate(config));
+
+        Assert.Contains("allowedProcessAccess takes full paths", error.Message);
+    }
+
     [Fact]
     public void Unknown_event_ids_are_ignored()
     {

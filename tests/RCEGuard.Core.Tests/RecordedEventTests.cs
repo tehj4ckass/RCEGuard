@@ -168,14 +168,16 @@ public class RecordedEventTests
     }
 
     [Fact]
-    public void R7_access_to_an_unknown_process_is_logged()
+    public void R7_all_access_to_a_program_the_client_did_not_start_alerts()
     {
+        // The same event without the R1 before it: the engine does not know the target as a child.
         var finding = Assert.Single(TestData.Engine().Evaluate(TestData.Fixture("r7-process-access-own-child")));
 
         Assert.Equal("R7", finding.RuleId);
-        Assert.Equal(Severity.Medium, finding.Severity);
-        Assert.Equal(FindingAction.Log, finding.Action);
+        Assert.Equal(Severity.High, finding.Severity);
+        Assert.Equal(FindingAction.Alert, finding.Action);
         Assert.Contains("0x1fffff", finding.Summary);
+        Assert.Empty(finding.KillTargets);
     }
 
     [Fact]

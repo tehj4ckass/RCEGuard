@@ -85,6 +85,54 @@ public static class RegistryRules
     private static bool Has(string text, string part) => text.Contains(part, StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>What the access rights a program asked for on another process let it do.</summary>
+public enum ProcessAccessKind
+{
+    /// <summary>Neither memory nor threads of the other process: asking about it, waiting for it and the like.</summary>
+    Other,
+
+    /// <summary>Reading the memory of the other process.</summary>
+    ReadsMemory,
+
+    /// <summary>Changing the other process: writing its memory or starting threads in it.</summary>
+    Changes,
+
+    /// <summary>The rights could not be read from the event.</summary>
+    Unreadable,
+}
+
+/// <summary>Reads the access mask of a ProcessAccess event (R7).</summary>
+public static class ProcessAccessRules
+{
+    private const int CreateThread = 0x0002;
+    private const int VmOperation = 0x0008;
+    private const int VmRead = 0x0010;
+    private const int VmWrite = 0x0020;
+
+    /// <summary>
+    /// Classifies a mask as Sysmon writes it ("0x1410"). The rights that code injection needs
+    /// (start a thread, change memory protection, write memory) count as <see cref="ProcessAccessKind.Changes"/>;
+    /// "all access" (0x1fffff) contains them.
+    /// </summary>
+    public static ProcessAccessKind Classify(string grantedAccess)
+    {
+        var text = grantedAccess.Trim();
+        if (!text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(text[2..], System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var mask)
+            || mask <= 0)
+        {
+            return ProcessAccessKind.Unreadable;
+        }
+
+        if ((mask & (CreateThread | VmOperation | VmWrite)) != 0)
+        {
+            return ProcessAccessKind.Changes;
+        }
+
+        return (mask & VmRead) != 0 ? ProcessAccessKind.ReadsMemory : ProcessAccessKind.Other;
+    }
+}
+
 /// <summary>Path checks shared by the file and module rules. All comparisons ignore case.</summary>
 public static class PathRules
 {

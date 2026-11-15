@@ -10,7 +10,12 @@ namespace RCEGuard.Core.Learning;
 /// <summary>What the learning mode suggests to add to the allowlist of a profile.</summary>
 /// <param name="Hostnames">Host names to add to 'allowedHostnames'.</param>
 /// <param name="Addresses">Addresses to add to 'allowedRemote' (no host name was seen for them).</param>
-public sealed record LearnedSuggestion(IReadOnlyList<string> Hostnames, IReadOnlyList<string> Addresses);
+/// <param name="Programs">Programs to add to 'allowedProcessAccess' (the client opened them to look at them).</param>
+public sealed record LearnedSuggestion(IReadOnlyList<string> Hostnames, IReadOnlyList<string> Addresses, IReadOnlyList<string> Programs)
+{
+    /// <summary>True if there is nothing to add.</summary>
+    public bool IsEmpty => Hostnames.Count == 0 && Addresses.Count == 0 && Programs.Count == 0;
+}
 
 /// <summary>Turns what the learning mode noted into a suggestion and into text for a person.</summary>
 public static class LearnedReport
@@ -19,6 +24,8 @@ public static class LearnedReport
     /// The suggestion for a profile: every address the client connected to that its allowlist does
     /// not cover. If the client asked the name service for a name that answered with the address,
     /// the name is suggested instead (addresses of a server change, its name does not).
+    /// And every other program the client opened without rights to change it; a program it only
+    /// ever opened with such rights is not suggested, because listing it would change nothing.
     /// </summary>
     public static LearnedSuggestion Suggest(LearnedProfile learned, ClientProfile profile)
     {
@@ -51,8 +58,16 @@ public static class LearnedReport
             }
         }
 
-        return new LearnedSuggestion(hostnames, addresses);
+        var programs = learned.Programs
+            .Where(program => !profile.AllowedProcessAccess.Contains(program.Image, StringComparer.OrdinalIgnoreCase))
+            .Where(program => program.Access.Any(access => !ChangesOrUnreadable(access)))
+            .Select(program => program.Image)
+            .ToList();
+        return new LearnedSuggestion(hostnames, addresses, programs);
     }
+
+    private static bool ChangesOrUnreadable(string access) =>
+        ProcessAccessRules.Classify(access) is ProcessAccessKind.Changes or ProcessAccessKind.Unreadable;
 
     private static List<string> NamesOf(LearnedProfile learned, string address) =>
         [.. learned.Hosts.Where(host => host.Addresses.Contains(address, StringComparer.OrdinalIgnoreCase)).Select(host => host.Name)];
@@ -122,20 +137,23 @@ public static class LearnedReport
 
         foreach (var program in learned.Programs.OrderBy(program => program.Image, StringComparer.OrdinalIgnoreCase))
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"    {program.Image}  {program.Count}x  {string.Join(" ", program.Access)}");
+            var listed = profile.AllowedProcessAccess.Contains(program.Image, StringComparer.OrdinalIgnoreCase) ? "  (on allowedProcessAccess)" : string.Empty;
+            var note = program.Access.Any(ChangesOrUnreadable) ? "  <- with rights to change it: reported even if listed" : string.Empty;
+            text.AppendLine(CultureInfo.InvariantCulture, $"    {program.Image}  {program.Count}x  {string.Join(" ", program.Access)}{listed}{note}");
         }
 
         var suggestion = Suggest(learned, profile);
         text.AppendLine();
-        if (suggestion.Hostnames.Count == 0 && suggestion.Addresses.Count == 0)
+        if (suggestion.IsEmpty)
         {
-            text.AppendLine("  Suggestion: nothing to add. Every recorded connection is on the allowlist already.");
+            text.AppendLine("  Suggestion: nothing to add. Every recorded connection and every program the client looked at is on the lists already.");
             return text.ToString();
         }
 
         text.AppendLine("  Suggestion for this profile in appsettings.json (the lists as they would be afterwards):");
         text.AppendLine(CultureInfo.InvariantCulture, $"    \"allowedHostnames\": {JsonSerializer.Serialize(profile.AllowedHostnames.Concat(suggestion.Hostnames))},");
-        text.AppendLine(CultureInfo.InvariantCulture, $"    \"allowedRemote\": {JsonSerializer.Serialize(profile.AllowedRemote.Concat(suggestion.Addresses))}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"    \"allowedRemote\": {JsonSerializer.Serialize(profile.AllowedRemote.Concat(suggestion.Addresses))},");
+        text.AppendLine(CultureInfo.InvariantCulture, $"    \"allowedProcessAccess\": {JsonSerializer.Serialize(profile.AllowedProcessAccess.Concat(suggestion.Programs))}");
         text.AppendLine("  Only take over what you recognise: everything the client did while learning is in here,");
         text.AppendLine("  whether you wanted it or not. Then set \"learning\": false and restart the service.");
         return text.ToString();

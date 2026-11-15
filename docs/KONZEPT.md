@@ -986,6 +986,7 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
 1. **Lernmodus sammelt und schlägt vor** (Kern und Dienst, Befehl `--learned`). Gebaut, siehe unten.
 2. **R7 bewerten:** Zugriffsrechte einordnen (nur lesen gegen schreiben/Threads), bekannte Ziele aus dem Gelernten
    zulassen, unbekannte mit Schreibrechten melden. Dazu ein Simulator-Szenario, das ein anderes Programm nur öffnet.
+   Gebaut, siehe unten.
 3. **R8:** CPU-Last des Clients im Dienst abfragen, Szenario `--cpu` gibt es schon.
 4. **Vorschlag in der Tray-App** und Anzeige, dass ein Profil lernt. Hängt an der offenen Entscheidung zur
    Profilverwaltung (Abschnitt 16).
@@ -1017,7 +1018,7 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
     heißen: Was ein Angreifer im Lernmodus tut, steht danach auf der Allowlist.
   - *Dateien und geöffnete Programme werden nur gezeigt.* Eine Allowlist für Dateipfade gibt es nicht: R3 für
     gewöhnliche Dateien außerhalb des Spielordners ist ohnehin nur ein Logeintrag, es gäbe nichts abzuschalten. Für
-    geöffnete Programme kommt sie mit Schritt 2.
+    geöffnete Programme kam sie mit Schritt 2.
   - *Geprüft:* 26 neue Tests im Kern (Regeln im Lernmodus, Sammeln, Grenzen, Vorschlag, Datei) und 12 im Dienst
     (Wächterschleife mit Stellvertreter-Firewall: nichts beendet, nichts gesperrt, keine Regel, Notizen gespeichert
     und nach Neustart fortgesetzt; Befehl `--learned`). Alle drei Suiten grün (224, 93, 29). Echt und ohne
@@ -1037,3 +1038,37 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
       ist eine Zeile im Dienst. Für die erste Sitzung mit dem echten Client spricht einiges für die gebaute
       Variante: Ein Fehlalarm bei R1 (z. B. ein Fehlerbericht-Programm des Clients) würde sonst das Spiel beenden.
     - Soll der Lernmodus von selbst enden (z. B. nach zwei Sitzungen)? Nicht gebaut.
+- **Schritt 2 (15.11.2026): R7 bewerten.** Nicht am installierten Dienst gelaufen.
+  - *Einordnung nach den Rechten (`ProcessAccessRules.Classify`):* Rechte, mit denen sich das andere Programm
+    verändern lässt (Thread starten `0x0002`, Speicherschutz ändern `0x0008`, Speicher schreiben `0x0020`; „alle
+    Rechte“ `0x1fffff`/`0x1F0FFF` enthalten sie) → HOCH, Alarm. Speicher lesen (`0x0010`) → MITTEL, Log. Alles
+    darunter (Auskunft, Warten) → Info, Log. Rechte, die sich nicht lesen lassen → HOCH, Alarm (fail closed). R7
+    beendet nie: Ein Handle anzufordern ändert noch nichts; wird wirklich ein Thread gestartet, greift R6.
+  - *Abweichung vom Konzept:* Abschnitt 4 nennt R7 MITTEL und „nur loggen“, bis der Lernmodus Daten hat, weil Warden
+    andere Programme durchsuchen könnte. Durchsuchen braucht Leserechte; die bleiben ein Logeintrag. Ein Alarm ist
+    nur das Öffnen mit Schreib- oder Thread-Rechten. Ob der echte Client das je tut (alter Code fordert gern „alle
+    Rechte“ an, auch wenn er nur lesen will), zeigt erst die Sitzung mit ihm; dann müsste die Regel oder die
+    Allowlist die Rechte je Programm kennen. Bis dahin ist es ein Alarm ohne Beenden.
+  - *Allowlist `allowedProcessAccess` je Profil:* volle Pfade (ein bloßer Name träfe auch ein gleichnamiges Programm
+    im Download-Ordner). Ein gelistetes Programm darf angesehen werden (Auskunft, Speicher lesen), ohne Eintrag.
+    Rechte zum Verändern meldet R7 auch für gelistete Programme: Sonst wäre ein einmal gelerntes Programm ein
+    Freibrief, Code hineinzuschreiben.
+  - *Der Client öffnet sich selbst:* kein Befund (Quelle und Ziel dieselbe Prozess-GUID). Ein zweiter Prozess
+    desselben Programms ist ein anderes Programm.
+  - *Vorschlag:* `--learned` schlägt `allowedProcessAccess` mit vor: jedes Programm, das der Client mindestens einmal
+    ohne Rechte zum Verändern geöffnet hat. Ein nur mit solchen Rechten geöffnetes Programm steht in der Liste mit
+    einem Vermerk, wird aber nicht vorgeschlagen.
+  - *Simulator `--open-process [query|read|write]`:* fordert bei Windows ein Handle auf den Explorer der Sitzung an
+    (`0x1000`, `0x1010`, `0x102a`) und schließt es sofort. Gelesen oder geschrieben wird nichts; das Handle wird
+    nie benutzt. Der Explorer, weil der Simulator kein eigenes Kind öffnen kann (das wäre R1) und der Explorer in
+    jeder Sitzung läuft.
+  - *Geprüft:* 24 neue Tests im Kern (Einordnung, Allowlist, sich selbst öffnen, Vorschlag, Konfiguration); alle
+    Suiten grün (248, 93, 29). Wiedergabe der gespeicherten Ereignisse (`out\m2-events.xml`, `out\events.xml`):
+    dieselben Befunde wie vorher, kein R7 (alle Zugriffe darin gelten eigenen Kindern). Echt und ohne Admin-Rechte,
+    am installierten Dienst im Stand von vor diesem Schritt: der neue Simulator in `C:\RCEGuardTest` mit allen drei
+    Varianten; der Dienst meldete drei R7-Einträge mit genau den angeforderten Rechten (`0x1000`, `0x1010`,
+    `0x102a`) und dem Ziel `C:\WINDOWS\Explorer.EXE`, 0,1 bis 1,0 s nach dem Ereignis. Die .NET-Laufzeit des
+    Simulators öffnet dabei von sich aus kein weiteres Programm.
+  - *Nicht geprüft:* die neue Einordnung am installierten Dienst (dort läuft noch der alte Stand: alle drei als
+    MITTEL); ein aufgezeichnetes Ereignis 10 für ein fremdes Programm als Fixture (das Sysmon-Log braucht
+    Admin-Rechte; kommt mit der Abnahme); der echte Client.

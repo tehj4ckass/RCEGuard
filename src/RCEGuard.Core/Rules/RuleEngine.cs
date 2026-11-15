@@ -214,7 +214,7 @@ public sealed class RuleEngine
 
         if (childToClient.Count >= MaxTrackedChildren)
         {
-            childToClient.Clear(); // Bounded on purpose; losing the hint only makes R7 log an own child.
+            childToClient.Clear(); // Bounded on purpose; losing the hint only makes R7 report an own child.
         }
 
         childToClient[childGuid] = clientGuid;
@@ -507,7 +507,7 @@ public sealed class RuleEngine
         ];
     }
 
-    // --- Event 10: R7 (other process opened) - recorded only until the learning mode exists ---
+    // --- Event 10: R7 (other process opened) --------------------------------------------------
     private IReadOnlyList<Finding> OnProcessAccess(SysmonEvent e)
     {
         var image = e.Get("SourceImage");
@@ -518,20 +518,49 @@ public sealed class RuleEngine
         }
 
         // A parent always holds a handle to the child it started; that access belongs to R1.
-        if (childToClient.ContainsKey(e.Get("TargetProcessGUID")))
+        // A process opening itself touches nobody else.
+        var targetGuid = e.Get("TargetProcessGUID");
+        if (childToClient.ContainsKey(targetGuid)
+            || (targetGuid.Length > 0 && string.Equals(targetGuid, e.Get("SourceProcessGUID"), StringComparison.OrdinalIgnoreCase)))
         {
             return [];
         }
 
         var target = e.Get("TargetImage");
+        var access = e.Get("GrantedAccess");
+        var kind = ProcessAccessRules.Classify(access);
+        var known = profile.AllowedProcessAccess.Any(allowed => PathRules.Same(allowed, target));
+
+        // The allowlist is for looking at other programs (an anti-cheat scan does that). Rights to
+        // change another program are what code injection starts with: no list entry makes that expected.
+        if (known && kind is ProcessAccessKind.Other or ProcessAccessKind.ReadsMemory)
+        {
+            return [];
+        }
+
+        var (severity, action, summary) = kind switch
+        {
+            ProcessAccessKind.Changes => (
+                Severity.High, FindingAction.Alert,
+                $"The game client opened another program with rights to change it ({access}: write its memory or start threads in it): {target}"),
+            ProcessAccessKind.Unreadable => (
+                Severity.High, FindingAction.Alert,
+                $"The game client opened another program with access rights that could not be read ('{access}'): {target}"),
+            ProcessAccessKind.ReadsMemory => (
+                Severity.Medium, FindingAction.Log,
+                $"The game client opened another program to read its memory ({access}): {target}"),
+            _ => (
+                Severity.Info, FindingAction.Log,
+                $"The game client opened another program ({access}): {target}"),
+        };
         return
         [
             new Finding
             {
                 RuleId = "R7",
-                Severity = Severity.Medium,
-                Action = FindingAction.Log,
-                Summary = $"The game client opened another program ({e.Get("GrantedAccess")}): {target}",
+                Severity = severity,
+                Action = action,
+                Summary = summary,
                 Profile = profile.Name,
                 Image = image,
                 ProcessId = e.GetInt("SourceProcessId"),

@@ -259,6 +259,47 @@ public class LearningTests
         Assert.Equal(["198.51.100.7"], suggestion.Addresses);
     }
 
+    private static SysmonEvent Access(string target, string access) => TestData.Event(
+        SysmonEventIds.ProcessAccess,
+        ("SourceImage", Client),
+        ("SourceProcessId", "100"),
+        ("SourceProcessGUID", "{22222222-0000-0000-0000-000000000001}"),
+        ("TargetImage", target),
+        ("TargetProcessGUID", "{22222222-0000-0000-0000-000000000002}"),
+        ("GrantedAccess", access));
+
+    [Fact]
+    public void A_program_the_client_looked_at_is_suggested_but_not_one_it_only_opened_to_change()
+    {
+        var learned = Observe(
+            Learning,
+            Access(@"C:\Windows\explorer.exe", "0x1410"),
+            Access(@"C:\Tools\both.exe", "0x1000"), Access(@"C:\Tools\both.exe", "0x1fffff"),
+            Access(@"C:\Tools\changed.exe", "0x1fffff"));
+
+        var suggestion = LearnedReport.Suggest(learned, Learning);
+        var text = LearnedReport.Render(learned, Learning);
+
+        Assert.Equal([@"C:\Windows\explorer.exe", @"C:\Tools\both.exe"], suggestion.Programs);
+        Assert.Contains(@"C:\Tools\changed.exe  1x  0x1fffff  <- with rights to change it: reported even if listed", text);
+        Assert.Contains(@"C:\Windows\explorer.exe  1x  0x1410" + Environment.NewLine, text);
+        Assert.Contains(@"""allowedProcessAccess"": [""C:\\Windows\\explorer.exe"",""C:\\Tools\\both.exe""]", text);
+    }
+
+    [Fact]
+    public void A_listed_program_is_neither_noted_again_nor_suggested()
+    {
+        var profile = Learning with { AllowedProcessAccess = [@"C:\Windows\explorer.exe"] };
+
+        var learned = Observe(profile, Access(@"C:\WINDOWS\Explorer.EXE", "0x1410"), Access(@"C:\WINDOWS\Explorer.EXE", "0x1fffff"));
+
+        // Looking at it left no finding and so no note; opening it to change it did.
+        var program = Assert.Single(learned.Programs);
+        Assert.Equal(["0x1fffff"], program.Access);
+        Assert.True(LearnedReport.Suggest(learned, profile).IsEmpty);
+        Assert.Contains("(on allowedProcessAccess)", LearnedReport.Render(learned, profile));
+    }
+
     [Fact]
     public void What_the_allowlist_covers_already_is_not_suggested()
     {
