@@ -910,6 +910,12 @@ der Tray-App. (4) Abnahme.
     Sekunden zusammenkam: sechs meldende Befunde in 15 s (17:17:48 bis 17:18:03), und der Test hat die Tray-App
     dreimal beendet und über den Explorer neu gestartet (jeder Lauf von `install.ps1`). Vermutung, nicht belegt: Die
     Auswahl des Snipping Tools bricht ab, wenn ein anderes Fenster oder eine Benachrichtigung den Fokus bekommt.
+  - *Genauer (Inhaber, 15.11.2026):* Das Snipping Tool startete, der Bildschirm dunkelte sich ab, der Hinweis der
+    Tray-App lag darüber, und die Auswahl ließ sich nicht benutzen. Ein Nachstellen danach (Auswahl über
+    `ms-screenclip:` öffnen, einen einzelnen Hinweis von einem eigenen Symbol zeigen, den Fokus messen) hat der
+    Inhaber abgebrochen; eine Messung liegt nicht vor. Seine Rückmeldung dazu: Die Auswahl funktionierte. Ob der
+    Hinweis des Nachstellens zu dem Zeitpunkt schon gezeigt war, ist offen. Belegt ist damit nur: Die Auswahl an
+    sich geht auf dem Rechner; nicht belegt bleibt, was sie im Testlauf blockiert hat.
   - *Hinweise gebündelt.* Unabhängig von der Ursache war die Serie zu viel: höchstens ein Hinweis in zehn Sekunden
     (`MainViewModel.ToastPause`); was dazwischen kommt, wird danach gemeinsam gemeldet. Symbol und Liste folgen
     sofort. Test mit gestellter Uhr nach dem Muster des Laufs.
