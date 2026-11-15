@@ -751,8 +751,14 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     die Registry allein); die Ausgabe von `install.ps1` aus dem Lauf liegt nicht vor. Am Ergebnis ändert das nichts.
   - *Weiter nicht geprüft:* `uninstall.ps1` mit gesetzter Einstellung (das prüft `install-test.ps1`, Schritte C und
     D, auf einem Rechner ohne RCEGuard); der echte Client mit der Einstellung (Abschnitt 12).
-- **Stand M3 (15.11.2026):** Schritte 1 bis 3 gebaut und mit dem Simulator am installierten Dienst abgenommen. Offen:
-  `install-test.ps1` einmal vollständig mit dem neuen Schritt C; `uninstall.ps1` mit vorhandenen Firewall-Regeln;
-  Hostnamen im installierten Dienst; der echte Client (Firewall mit echter Allowlist, Sperre, Exploit Protection).
+  - *Rückbau durch `uninstall.ps1` (15.11.2026, 15:58): bestanden.* Der Inhaber hat `uninstall.ps1` ausgeführt
+    (Sysmon ohne Absturz entfernt) und danach `install-test.ps1`: ALL PASSED, 23 von 23. Schritt C installierte mit
+    `-BlockChildProcesses` (Einstellung `ON`), Schritt D: `uninstall.ps1` ohne Fehler, Einstellung „nicht gesetzt“,
+    der Rechner wie vor dem Test. Danach gelesen: kein Eintrag, kein Schlüssel `Image File Execution Options\Wow.exe`,
+    keine Firewall-Regel, nichts von einer Installation auf dem Rechner.
+- **Stand M3 (15.11.2026):** Schritte 1 bis 3 gebaut und mit dem Simulator abgenommen (`prevention-test.ps1` 27 von
+  27, `install-test.ps1` 23 von 23). Offen: `uninstall.ps1` mit vorhandenen Firewall-Regeln (im Test sind sie vor dem
+  Entfernen schon weg); Hostnamen im installierten Dienst; der echte Client (Firewall mit echter Allowlist, Sperre,
+  Exploit Protection).
   Entscheidungen des Inhabers: ob gesperrte Verbindungen und abgewiesene Programmstarts aus den Windows-Logs gelesen
   und gemeldet werden; ob der Simulator ein Fensterprogramm wird; was in M3 Standard wird, sobald die Tray-App da ist.
