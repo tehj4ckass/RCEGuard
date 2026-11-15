@@ -39,6 +39,26 @@
             </StackPanel>
         </Border>
 
+        <!-- Profiles in learning mode: watched, not protected. -->
+        <Border DockPanel.Dock="Top" Padding="16,10" Background="#E3F2FD" BorderBrush="#1565C0" BorderThickness="0,0,0,1"
+                Visibility="{Binding HasLearning, Converter={StaticResource Visible}}">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="Learning mode: watched, not protected" />
+                <ItemsControl ItemsSource="{Binding Learning}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,6,0,0">
+                                <Button DockPanel.Dock="Right" Content="What was learned ..." Padding="12,3" Margin="12,0,0,0" VerticalAlignment="Top"
+                                        Tag="{Binding Profile}" Click="OnLearnedClick"
+                                        ToolTip="Shows what the client did while learning and what that suggests for the allowlist." />
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
         <DockPanel DockPanel.Dock="Bottom" Margin="16,8">
             <Button DockPanel.Dock="Right" Content="Open data folder" Padding="12,3" Click="OnOpenFolderClick" />
             <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#555555">

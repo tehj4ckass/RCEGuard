@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using RCEGuard.Core.Learning;
 using RCEGuard.Core.Rules;
 using RCEGuard.Tray.Model;
 using Drawing = System.Drawing;
@@ -47,11 +48,10 @@ public sealed class RenderTests
         }
     }
 
-    private static void Render(MainViewModel viewModel, string fileName)
+    private static void Render(MainViewModel viewModel, string fileName) => Render((FrameworkElement)new MainWindow(viewModel).Content, fileName, new Size(1024, 560));
+
+    private static void Render(FrameworkElement root, string fileName, Size size)
     {
-        var window = new MainWindow(viewModel);
-        var root = (FrameworkElement)window.Content;
-        var size = new Size(1024, 560);
         root.Measure(size);
         root.Arrange(new Rect(size));
         // Bindings and the rows of the list are filled in by the dispatcher.
@@ -104,6 +104,51 @@ public sealed class RenderTests
         });
 
         Assert.True(new FileInfo(Path.Combine(Pictures, "window-locked.png")).Length > 10_000);
+    }
+
+    [Fact]
+    public void The_window_draws_a_profile_in_learning_mode_and_what_it_learned()
+    {
+        OnUiThread(() =>
+        {
+            using var data = new DataFolder();
+            data.Configure(""", "learning": true, "allowedRemote": ["198.51.100.0/24"] """);
+            data.Learn(new LearnedProfile
+            {
+                Profile = "Warmane",
+                Sessions = 2,
+                FirstEventUtc = new DateTimeOffset(2026, 11, 15, 18, 0, 0, TimeSpan.Zero),
+                LastEventUtc = new DateTimeOffset(2026, 11, 15, 20, 30, 0, TimeSpan.Zero),
+                Remotes =
+                [
+                    new LearnedRemote { Address = "203.0.113.9", Port = 3724, Count = 3 },
+                    new LearnedRemote { Address = "198.51.100.20", Port = 8085, Count = 2 },
+                    new LearnedRemote { Address = "192.0.2.200", Port = 80, Count = 1 },
+                ],
+                Hosts = [new LearnedHost { Name = "logon.example.org", Addresses = ["203.0.113.9"], Count = 2 }],
+                Folders = [new LearnedFolder { Folder = @"C:\Users\player\AppData\Local\Temp\", Extensions = [".tmp"], Count = 4 }],
+                Programs = [new LearnedProgram { Image = @"C:\Windows\explorer.exe", Access = ["0x1410"], Count = 6 }],
+                PeakCpuCores = 1.3,
+            });
+            data.Add("R2", Severity.Info, FindingAction.Log, "Learning mode: the game client connected to 203.0.113.9:3724 (not on the allowlist)", profile: "Warmane");
+            data.Add(
+                "R1", Severity.Critical, FindingAction.Kill, @"The game client started another program: C:\Windows\System32\cmd.exe",
+                "not terminated (learning mode)", profile: "Warmane");
+            var viewModel = data.ViewModel();
+            viewModel.Refresh();
+            viewModel.MarkSeen();
+
+            Render(viewModel, "window-learning.png");
+            var line = Assert.Single(viewModel.Learning);
+            var view = new MainWindow(viewModel).LearnedView(line);
+            Render((FrameworkElement)view.Content, "window-learned.png", new Size(900, 520));
+
+            Assert.Equal(TrayKind.Learning, viewModel.State.Kind);
+            Assert.Contains("'Warmane'", view.Title);
+        });
+
+        Assert.True(new FileInfo(Path.Combine(Pictures, "window-learning.png")).Length > 10_000);
+        Assert.True(new FileInfo(Path.Combine(Pictures, "window-learned.png")).Length > 10_000);
     }
 
     [Fact]

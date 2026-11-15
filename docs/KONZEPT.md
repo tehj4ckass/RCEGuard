@@ -991,7 +991,7 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
    Gebaut, siehe unten.
 3. **R8:** CPU-Last des Clients im Dienst abfragen, Szenario `--cpu` gibt es schon. Gebaut, siehe unten.
 4. **Vorschlag in der Tray-App** und Anzeige, dass ein Profil lernt. Hängt an der offenen Entscheidung zur
-   Profilverwaltung (Abschnitt 16).
+   Profilverwaltung (Abschnitt 16). Anzeige und Vorschlag gebaut (ohne Übernehmen), siehe Abschnitt 19 am Ende.
 5. **Abnahme am installierten Dienst** mit dem Simulator; danach die Sitzung mit dem echten Client (Abschnitt 11).
    Das Skript ist gebaut (vor der Tray-Anzeige, weil aus den Schritten 1 bis 3 zu viel nur mit Tests belegt war),
    siehe unten.
@@ -1353,3 +1353,22 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
       Messung, keine Regel, keine Sperre. Keine Warnung des Dienstes zur Tabelle im Log.
     - *Weiter nicht geprüft:* der echte Client (seine Verbindungen stehen lange; ob der Dienst sie über Sysmon oder
       über die Tabelle sieht, zeigt die erste Sitzung im Lernmodus); die Last durch das Abfragen.
+- **Schritt 4 (15.11.2026): Lernmodus in der Tray-App.** Nicht neben dem installierten Dienst gesehen.
+  - *Symbol:* blaues Schild mit Ring (`TrayKind.Learning`). Reihenfolge: Dienst läuft nicht, dann Sperre, dann neue
+    Befunde, dann Lernmodus, dann „alles ruhig“. Bei neuen Befunden im Lernmodus bleibt das Symbol orange, die
+    zweite Zeile sagt aber dazu, dass für diesen Client nichts beendet oder blockiert wird.
+  - *Fenster:* Überschrift „Learning mode: '…' is watched, not protected“, darunter in Blau je lernendem Profil eine
+    Zeile (Starts des Clients, Verbindungsziele, geöffnete Programme) mit dem Knopf „What was learned ...“. Der
+    öffnet ein Fenster mit dem Text, den auch `--learned` druckt (`LearnedReport.Render`, derselbe Code), zum Lesen
+    und Kopieren.
+  - *Woher die Tray-App es weiß:* aus der Konfigurationsdatei (wie schon die Namen der Profile) und aus
+    `learned.json`. Sie liest also, was in der Datei steht, nicht, was der laufende Dienst geladen hat; nach einer
+    Änderung ohne Neustart des Dienstes weicht das ab. Eine eigene Statusdatei des Dienstes würde das schließen,
+    ist aber nicht gebaut.
+  - *Übernehmen bleibt Handarbeit:* Die Tray-App schreibt keine Konfiguration (Abschnitt 16, offene Entscheidung zur
+    Profilverwaltung). Der Text sagt das im Fenster.
+  - *Geprüft:* 5 neue Tests (Zustand und Reihenfolge, Status liest lernende Profile und Notizen, Zeilen und Text im
+    Fenster, Bilder); alle Suiten grün (276, 107, 34). Fenster mit Lernmodus, das Fenster mit dem Gelernten und die
+    fünf Symbole in Bilder gezeichnet und angesehen.
+  - *Nicht geprüft:* die Tray-App neben dem installierten Dienst mit einem lernenden Profil (Symbolwechsel, Knopf,
+    Kopieren in die Zwischenablage); `learned.json` lesen, während der Dienst sie gerade ersetzt.

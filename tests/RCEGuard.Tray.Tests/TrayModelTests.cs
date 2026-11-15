@@ -1,5 +1,6 @@
 using System.IO;
 using RCEGuard.Core.Configuration;
+using RCEGuard.Core.Learning;
 using RCEGuard.Core.Rules;
 using RCEGuard.Core.State;
 using RCEGuard.Service;
@@ -41,6 +42,15 @@ internal sealed class DataFolder : IDisposable
 
     public void Lock(string profile) => new LockdownFile(System.IO.Path.Combine(Path, LockdownFile.FileName)).Save(
         [new LockdownEntry(profile, new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero), "R1", "The game client started another program")]);
+
+    /// <summary>A configuration with one profile "Warmane"; <paramref name="profileSettings"/> go into the profile.</summary>
+    public void Configure(string profileSettings = "") => File.WriteAllText(
+        System.IO.Path.Combine(Path, "appsettings.json"),
+        $$"""{"cpuAlertCores": 2.0, "profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe" {{profileSettings}} }]}""");
+
+    /// <summary>Notes of the learning mode as the service saves them.</summary>
+    public void Learn(params LearnedProfile[] notes) =>
+        new LearnedFile(System.IO.Path.Combine(Path, LearnedFile.FileName)).Save(notes);
 
     public MainViewModel ViewModel(ServiceState service = ServiceState.Running, Func<DateTimeOffset>? clock = null) =>
         new(Path, new StatusReader(Path, () => service), new SeenFile(SeenPath), clock);
@@ -159,6 +169,99 @@ public sealed class TrayModelTests : IDisposable
         Assert.Equal((Enum.Parse<TrayKind>(kind), headline), (state.Kind, state.Headline));
         Assert.StartsWith("RCEGuard", state.Tooltip);
         Assert.True(state.Tooltip.Length <= 100);
+    }
+
+    private static GuardStatus LearningStatus(ServiceState service = ServiceState.Running, int locked = 0, int learning = 1, int profiles = 1) => new(
+        service,
+        [.. Enumerable.Range(1, profiles).Select(n => new ClientProfile { Name = $"Client{n}", ClientPath = $@"C:\Games\{n}\Wow.exe", Learning = n <= learning })],
+        null,
+        [.. Enumerable.Range(1, locked).Select(n => new LockdownEntry($"Client{n}", DateTimeOffset.UtcNow, "R1", "x"))],
+        null,
+        true);
+
+    [Fact]
+    public void A_client_in_learning_mode_is_shown_as_watched_not_protected()
+    {
+        var state = TrayState.From(LearningStatus(), 0);
+
+        Assert.Equal((TrayKind.Learning, "Learning mode: 'Client1' is watched, not protected"), (state.Kind, state.Headline));
+        Assert.Equal("RCEGuard: learning mode for 'Client1' (not protected)", state.Tooltip);
+        Assert.Contains("nothing is terminated, locked down or blocked", state.Detail);
+        Assert.Contains("\"learning\": false", state.Detail);
+
+        var two = TrayState.From(LearningStatus(learning: 2, profiles: 3), 0);
+        Assert.Equal("Learning mode: 'Client1', 'Client2' are watched, not protected", two.Headline);
+        Assert.True(two.Tooltip.Length <= 100);
+    }
+
+    [Fact]
+    public void Learning_mode_counts_less_than_new_findings_a_lockdown_or_a_guard_that_is_down()
+    {
+        var findings = TrayState.From(LearningStatus(), 2);
+        Assert.Equal((TrayKind.Alert, "2 new findings"), (findings.Kind, findings.Headline));
+        // Still said: who reads about a finding must know that nothing was done about it.
+        Assert.Contains("Learning mode is on for 'Client1': nothing is terminated or blocked there.", findings.Detail);
+
+        Assert.Equal(TrayKind.Locked, TrayState.From(LearningStatus(locked: 1), 0).Kind);
+        Assert.Equal(TrayKind.NotWatching, TrayState.From(LearningStatus(ServiceState.Stopped), 0).Kind);
+        // Without a learning profile nothing changes.
+        Assert.Equal(TrayKind.Watching, TrayState.From(LearningStatus(learning: 0), 0).Kind);
+        Assert.DoesNotContain("Learning", TrayState.From(LearningStatus(learning: 0), 2).Detail);
+    }
+
+    [Fact]
+    public void The_status_reads_which_profiles_learn_and_what_was_noted()
+    {
+        data.Configure(""", "learning": true """);
+        data.Learn(new LearnedProfile { Profile = "Warmane", Sessions = 2 }, new LearnedProfile { Profile = "Other", Sessions = 1 });
+
+        var status = new StatusReader(data.Path, () => ServiceState.Running).Read();
+
+        Assert.Equal("Warmane", Assert.Single(status.Learning).Name);
+        Assert.Equal(2, status.Learned!.Count);
+        Assert.Equal(2.0, status.CpuAlertCores);
+
+        // Notes that cannot be read are no notes, and no problem for the rest.
+        File.WriteAllText(Path.Combine(data.Path, LearnedFile.FileName), "{ not json");
+        var broken = new StatusReader(data.Path, () => ServiceState.Running).Read();
+        Assert.Empty(broken.Learned!);
+        Assert.Single(broken.Learning);
+    }
+
+    [Fact]
+    public void A_learning_profile_is_listed_with_what_was_noted_and_the_suggestion()
+    {
+        data.Configure(""", "learning": true, "allowedRemote": ["198.51.100.0/24"] """);
+        var viewModel = data.ViewModel();
+        viewModel.Refresh();
+
+        var nothing = Assert.Single(viewModel.Learning);
+        Assert.True(viewModel.HasLearning);
+        Assert.Equal(("Warmane", "'Warmane': nothing noted yet."), (nothing.Profile, nothing.Text));
+        Assert.Contains("nothing was noted yet", nothing.Report);
+        Assert.Equal(TrayKind.Learning, viewModel.State.Kind);
+
+        data.Learn(new LearnedProfile
+        {
+            Profile = "warmane",
+            Sessions = 2,
+            Remotes = [new LearnedRemote { Address = "203.0.113.9", Port = 3724, Count = 3 }],
+            Hosts = [new LearnedHost { Name = "logon.example.org", Addresses = ["203.0.113.9"], Count = 2 }],
+            PeakCpuCores = 1.2,
+        });
+        viewModel.Refresh();
+
+        var line = Assert.Single(viewModel.Learning);
+        Assert.Equal("'Warmane': 2 starts of the client, 1 connection target, 0 other programs opened.", line.Text);
+        Assert.Contains("\"allowedHostnames\": [\"logon.example.org\"],", line.Report);
+        Assert.Contains("Highest processor load: 1.2 cores on average (R8 reports above 2.0: cpuAlertCores)", line.Report);
+
+        // Learning turned off: the notes stay in the file, the window stops showing them.
+        data.Configure();
+        viewModel.Refresh();
+        Assert.Empty(viewModel.Learning);
+        Assert.False(viewModel.HasLearning);
+        Assert.Equal(TrayKind.Watching, viewModel.State.Kind);
     }
 
     [Fact]

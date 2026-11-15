@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Microsoft.Data.Sqlite;
+using RCEGuard.Core.Learning;
 using RCEGuard.Core.State;
 using RCEGuard.Tray.Model;
 
@@ -8,6 +9,12 @@ namespace RCEGuard.Tray;
 
 /// <summary>A profile in lockdown, as shown in the window.</summary>
 internal sealed record LockdownLine(string Profile, string Text);
+
+/// <summary>A profile in learning mode, as shown in the window.</summary>
+/// <param name="Profile">Name of the profile.</param>
+/// <param name="Text">One line: how much was noted so far.</param>
+/// <param name="Report">Everything that was noted and what it suggests, as the service prints it with --learned.</param>
+internal sealed record LearningLine(string Profile, string Text, string Report);
 
 /// <summary>
 /// What the window and the icon show. <see cref="Refresh"/> reads everything anew; it is called by
@@ -65,6 +72,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>The profiles in lockdown.</summary>
     public ObservableCollection<LockdownLine> Lockdowns { get; } = [];
 
+    /// <summary>The profiles in learning mode.</summary>
+    public ObservableCollection<LearningLine> Learning { get; } = [];
+
     /// <summary>Icon, tooltip and the two lines at the top.</summary>
     public TrayState State
     {
@@ -96,6 +106,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     /// <summary>True if a profile is in lockdown.</summary>
     public bool HasLockdowns => Lockdowns.Count > 0;
+
+    /// <summary>True if a profile is in learning mode.</summary>
+    public bool HasLearning => Learning.Count > 0;
 
     /// <summary>The user is looking at the list: what is in it counts as seen.</summary>
     public void MarkSeen()
@@ -135,8 +148,30 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             : [.. status.Locked.Select(entry => new LockdownLine(entry.Profile, TrayState.Describe(entry)))];
         Replace(Lockdowns, lockdowns);
         Changed(nameof(HasLockdowns));
+        Replace(Learning, [.. status.Learning.Select(profile => Describe(profile, status))]);
+        Changed(nameof(HasLearning));
         State = TrayState.From(status, unseen);
     }
+
+    /// <summary>The line and the full text for a profile in learning mode.</summary>
+    private static LearningLine Describe(Core.Configuration.ClientProfile profile, GuardStatus status)
+    {
+        var notes = status.Learned?.FirstOrDefault(learned => string.Equals(learned.Profile, profile.Name, StringComparison.OrdinalIgnoreCase));
+        if (notes is null)
+        {
+            return new LearningLine(
+                profile.Name,
+                $"'{profile.Name}': nothing noted yet.",
+                $"Profile '{profile.Name}': learning mode is ON, nothing was noted yet. Play a session, then look again.");
+        }
+
+        var text =
+            $"'{profile.Name}': {Count(notes.Sessions, "start")} of the client, {Count(notes.Remotes.Count, "connection target")}, " +
+            $"{Count(notes.Programs.Count, "other program")} opened.";
+        return new LearningLine(profile.Name, text, LearnedReport.Render(notes, profile, status.CpuAlertCores));
+    }
+
+    private static string Count(int number, string what) => number == 1 ? $"1 {what}" : $"{number} {what}s";
 
     /// <summary>Shows one pop-up for everything that is waiting, unless the last pop-up was a moment ago.</summary>
     private void ShowHeldBack(GuardStatus status)
