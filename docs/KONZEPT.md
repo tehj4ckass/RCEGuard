@@ -892,6 +892,13 @@ der Tray-App. (4) Abnahme.
   - *Weiter nicht geprüft:* der Autostart bei der Anmeldung; die Tray-App neben einem laufenden Dienst mit einem
     echten Befund (Hinweis von Windows, Symbolwechsel, Freigabe mit Admin-Abfrage); ein zweiter angemeldeter
     Benutzer.
+  - *Abgebrochene Installation hinterließ den Datenordner (15.11.2026, 17:14).* Ich hatte dem Inhaber
+    `prevention-test.ps1` ohne `-DownloadSysmon -AcceptSysmonEula` übergeben, obwohl Sysmon nach `install-test.ps1`
+    nicht mehr installiert war. `install.ps1` brach richtig ab ("Sysmon is not installed ..."), hatte da aber schon
+    den Datenordner angelegt und die Sysmon-Konfiguration hineingeschrieben; ohne Statusdatei räumte `uninstall.ps1`
+    das nicht weg. Jetzt prüft `install.ps1` Lizenz und Quelle von Sysmon, bevor es etwas anlegt, und
+    `uninstall.ps1` entfernt einen Datenordner ohne Statusdatei, wenn nichts als `sysmon-config.xml` darin liegt
+    (ein Ordner mit anderem Inhalt bleibt). Geprüft mit Stellvertretern in PowerShell 7 und 5.1 (6 Fälle).
   - *Nicht gebaut: Profilverwaltung.* Profile in der Tray-App zu bearbeiten hieße, die Konfiguration mit
     Admin-Rechten zu schreiben und den Dienst neu zu starten. Bis das entschieden ist, bleibt es beim Bearbeiten von
     `appsettings.json` als Administrator und einem Neustart des Dienstes. Entscheidung des Inhabers, ob und wie.

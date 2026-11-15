@@ -74,6 +74,13 @@ if ($serviceRemoved) {
 }
 
 if (-not (Test-Path -LiteralPath $statePath)) {
+    # An installation that stopped before it got anywhere leaves the data folder with nothing but
+    # the rendered Sysmon configuration in it. That is ours and goes; a folder with anything else stays.
+    $leftover = @(Get-ChildItem -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue)
+    if ((Test-Path -LiteralPath $dataDir) -and @($leftover | Where-Object { $_.Name -ne 'sysmon-config.xml' }).Count -eq 0) {
+        Remove-Item -LiteralPath $dataDir -Recurse -Force
+        Write-Host "Removed '$dataDir', left by an installation that was not completed."
+    }
     if ($serviceRemoved) {
         Write-Host "No sensor installation found ('$statePath' is missing); nothing else to do."
     }

@@ -94,6 +94,19 @@ $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 . (Join-Path $PSScriptRoot 'TrayTools.ps1')
 
 # Check this before anything on the machine is changed.
+if ($null -eq (Get-InstalledSysmon)) {
+    # Sysmon has to be installed. Without these the script would stop half way, after it had
+    # already created the data folder (seen on 2026-11-15: a folder nothing removed again).
+    if (-not $AcceptSysmonEula) {
+        throw "Sysmon is not installed. Installing it requires -AcceptSysmonEula (https://learn.microsoft.com/sysinternals/license-terms)."
+    }
+    if ($SysmonPath -and $DownloadSysmon) {
+        throw 'Use either -SysmonPath or -DownloadSysmon, not both.'
+    }
+    if (-not $SysmonPath -and -not $DownloadSysmon) {
+        throw "Sysmon is not installed. Pass -SysmonPath <Sysmon64.exe> or -DownloadSysmon (downloads $sysmonUrl)."
+    }
+}
 if ($BlockChildProcesses -and $AllowChildProcesses) {
     throw 'Use either -BlockChildProcesses or -AllowChildProcesses, not both.'
 }
@@ -171,16 +184,7 @@ Merge '$configPath' into your own configuration, or run again with -ReplaceExist
     Write-Host "Sysmon configuration updated (service '$($installed.ServiceName)')."
 }
 else {
-    if (-not $AcceptSysmonEula) {
-        throw "Sysmon is not installed. Installing it requires -AcceptSysmonEula (https://learn.microsoft.com/sysinternals/license-terms)."
-    }
-    if ($SysmonPath -and $DownloadSysmon) {
-        throw 'Use either -SysmonPath or -DownloadSysmon, not both.'
-    }
-    if (-not $SysmonPath -and -not $DownloadSysmon) {
-        throw "Sysmon is not installed. Pass -SysmonPath <Sysmon64.exe> or -DownloadSysmon (downloads $sysmonUrl)."
-    }
-
+    # Whether Sysmon can be installed at all (licence, where to take it from) was checked at the top.
     $logFileBefore = Test-Path -LiteralPath $script:SysmonLogFile
     $eulaKeyBefore = Test-Path -LiteralPath $script:SysmonEulaKey
     $tempDir = $null
