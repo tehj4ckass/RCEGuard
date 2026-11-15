@@ -4,6 +4,7 @@ using System.Net;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RCEGuard.Core.Sysmon;
+using RCEGuard.Core.State;
 
 namespace RCEGuard.Service.Tests;
 

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Prevention;
 using RCEGuard.Core.Rules;
+using RCEGuard.Core.State;
 
 namespace RCEGuard.Service.Tests;
 

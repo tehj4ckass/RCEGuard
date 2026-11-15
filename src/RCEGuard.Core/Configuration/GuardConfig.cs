@@ -37,6 +37,9 @@ public sealed record NotifyConfig
 {
     /// <summary>Push notifications through an ntfy server. Null: none.</summary>
     public NtfyConfig? Ntfy { get; init; }
+
+    /// <summary>If false, the tray application shows no pop-up for a new finding. On by default.</summary>
+    public bool Toast { get; init; } = true;
 }
 
 /// <summary>

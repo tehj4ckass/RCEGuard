@@ -1,20 +1,20 @@
 using System.Text.Json;
 
-namespace RCEGuard.Service;
+namespace RCEGuard.Core.State;
 
 /// <summary>A profile in lockdown and the finding that caused it.</summary>
 /// <param name="Profile">Name of the profile.</param>
 /// <param name="SinceUtc">Time of the event that caused the lockdown.</param>
 /// <param name="Rule">Rule id of the finding.</param>
 /// <param name="Summary">Summary of the finding.</param>
-internal sealed record LockdownEntry(string Profile, DateTimeOffset SinceUtc, string Rule, string Summary);
+public sealed record LockdownEntry(string Profile, DateTimeOffset SinceUtc, string Rule, string Summary);
 
 /// <summary>
 /// The profiles in lockdown, in a small file in the data folder. The file is what counts: the
 /// firewall rules are written from it, by the guard and by the release command alike, so a
 /// lockdown outlasts a restart of the guard and of Windows.
 /// </summary>
-internal sealed class LockdownFile
+public sealed class LockdownFile
 {
     /// <summary>Name of the file in the data folder.</summary>
     public const string FileName = "lockdown.json";

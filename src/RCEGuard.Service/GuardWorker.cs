@@ -7,6 +7,7 @@ using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Notifications;
 using RCEGuard.Core.Rules;
 using RCEGuard.Core.Sysmon;
+using RCEGuard.Core.State;
 
 namespace RCEGuard.Service;
 

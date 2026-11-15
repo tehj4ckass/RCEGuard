@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The tray application: shows what the guard service found and whether it is running. It runs as
+    the logged-on user, only reads (the data folder of the service is readable for every user) and
+    holds no security logic. The one thing it can start is the release command of the installed
+    service, which Windows asks an administrator to confirm.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Only for the notification area icon (NotifyIcon): no third-party package needed. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>RCEGuard.Tray</RootNamespace>
+    <AssemblyName>RCEGuard.Tray</AssemblyName>
+    <!-- The rest of the solution runs without culture data; WPF cannot draw text without it
+         ("Cannot find non-neutral culture related to 'en-us'"). -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows Forms and WPF both have Application, MessageBox, Color ...: name them where used. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <!-- WPF projects leave this one out of the implicit usings. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RCEGuard.Core\RCEGuard.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RCEGuard.Tray.Tests" />
+  </ItemGroup>
+
+</Project>

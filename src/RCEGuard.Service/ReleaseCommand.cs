@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using RCEGuard.Core.State;
+
 namespace RCEGuard.Service;
 
 /// <summary>

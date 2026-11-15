@@ -813,10 +813,46 @@ der Tray-App. (4) Abnahme.
   - *Nicht geprüft:* ein echter ntfy-Server (nimmt er die Kopfzeilen so, kommt die Meldung auf dem Telefon an); der
     installierte Dienst als `LocalSystem` (Netzzugriff, Namensauflösung); das Verhalten beim Herunterfahren von
     Windows.
-- **Tray-App liest, statt zu fragen (für Schritt 2 vorgesehen).** Abschnitt 3 zeichnet eine Named Pipe zwischen
-  Dienst und Tray-App. Geplant ist, dass die Tray-App stattdessen die Dateien liest, die der Dienst ohnehin für alle
-  lesbar ablegt (`findings.db`, `guard.log`, `lockdown.json`), und den Zustand von Dienst und Firewall abfragt. Dann
-  bekommt der Dienst (`LocalSystem`) keine Schnittstelle, über die ein Programm mit Benutzerrechten ihm etwas sagen
-  kann. Freigeben einer Sperre bliebe ein Befehl mit Admin-Rechten (die Tray-App startet ihn mit Abfrage der
-  Benutzerkontensteuerung): Könnte die Tray-App ohne Admin-Rechte freigeben, könnte es auch Schadcode mit
-  Benutzerrechten. Beides sind Entscheidungen, die der Inhaber vor Schritt 2 kippen kann.
+- **Schritt 2 (15.11.2026): Tray-App `RCEGuard.Tray`.** Gebaut und ohne Oberfläche getestet; mit einem installierten
+  Dienst noch nicht benutzt. `install.ps1` installiert und startet sie noch nicht (Schritt 3).
+  - *Liest, statt zu fragen.* Abschnitt 3 zeichnet eine Named Pipe zwischen Dienst und Tray-App. Die Tray-App liest
+    stattdessen die Dateien, die der Dienst ohnehin für alle lesbar ablegt (`findings.db` nur lesend, `lockdown.json`,
+    Konfiguration), und fragt Windows nach dem Zustand des Dienstes, alle 2 s. Der Dienst (`LocalSystem`) bekommt so
+    keine Schnittstelle, über die ein Programm mit Benutzerrechten ihm etwas sagen kann.
+  - *Freigeben nur mit Admin-Abfrage.* „Release ...“ startet `RCEGuard.Service.exe --release <Profil>` aus
+    `C:\Program Files\RCEGuard` mit dem Verb `runas`; Windows fragt nach einem Administrator. Könnte die Tray-App
+    ohne Admin-Rechte freigeben, könnte es auch Schadcode mit Benutzerrechten. Gestartet wird immer genau dieser
+    Pfad: Programme dort kann ein normaler Benutzer nicht austauschen. Eine nicht lesbare Sperrdatei (dann gelten
+    alle Profile als gesperrt) bietet eine Freigabe für alle an.
+  - *Kein Fremdpaket für das Symbol.* Abschnitt 3 nennt `H.NotifyIcon`. Genommen ist `NotifyIcon` aus Windows Forms,
+    das zu .NET gehört; das Fenster ist WPF. Die vier Symbole (Schild in Grün, Orange, Rot, Grau mit Haken,
+    Ausrufezeichen, Balken, Kreuz) werden beim Start gezeichnet, die App liefert keine Bilddateien mit. Das Zeichen
+    im Schild sagt den Zustand auch ohne Farbe.
+  - *Hinweise als Sprechblase des Symbols* (`ShowBalloonTip`); Windows 10 und 11 zeigen sie als Benachrichtigung
+    und behalten sie im Benachrichtigungscenter. Abschnitt 7 spricht von Toasts; für echte Toasts mit Schaltflächen
+    bräuchte die App eine Registrierung im Startmenü oder ein Zusatzpaket. `"notify": { "toast": false }` schaltet
+    die Hinweise ab.
+  - *Was gemeldet wird:* Befunde, die alarmiert oder beendet haben; mehrere auf einmal als ein Hinweis mit dem
+    schwersten. Der Stand je Windows-Benutzer steht in `%LOCALAPPDATA%\RCEGuard\tray-state.txt` (ID des letzten
+    gemeldeten Befunds): Was geschah, während die Tray-App nicht lief, wird beim nächsten Start gemeldet, nichts
+    doppelt. Der allererste Start meldet nichts Altes. Eine neue Datenbank nach einer Neuinstallation (IDs beginnen
+    wieder bei 1) wird erkannt. Ein anderer Datenordner (`--data-dir`) bekommt eine eigene Stand-Datei.
+  - *Rangfolge der Anzeige:* Dienst läuft nicht, vor Sperre, vor ungesehenen Befunden, vor „beobachtet“.
+    „Ungesehen“ endet, wenn das Fenster in den Vordergrund kommt.
+  - *Gemeinsames im Kern:* `LockdownFile` und das Laden der Konfiguration (`GuardConfigFile`) sind in den Kern
+    umgezogen, damit Dienst und Tray-App dasselbe Dateiformat aus einer Stelle lesen. Die Tabelle `findings` liest
+    die Tray-App mit eigenem Code; ihr Test schreibt die Datenbank mit dem `FindingStore` des Dienstes, eine
+    Schemaänderung dort fällt also im Tray-Test auf.
+  - *Im Test gefunden:* WPF läuft nicht mit `InvariantGlobalization` („Cannot find non-neutral culture related to
+    'en-us'“); die Einstellung gilt lösungsweit und ist für die beiden Tray-Projekte abgeschaltet. Ohne den Test,
+    der das Fenster zeichnet, wäre die App beim Start abgestürzt.
+  - *Geprüft:* 28 Tests ohne Oberfläche (Lesen der vom Dienst geschriebenen Datenbank, auch während er sie offen
+    hat; Zustand und Rangfolge; was gemeldet wird; Freigabe-Argumente; Fenster und Symbole werden in Bilddateien
+    gezeichnet). Die Bilder (gesperrtes Profil mit sechs Befunden, „nicht installiert“, die vier Symbole) habe ich
+    angesehen. Die App einmal 5 s gegen einen Beispielordner gestartet: läuft, Fenster „RCEGuard“, reagiert, kein
+    Absturzbericht; ein zweiter Start zeigt nur den Hinweis, dass sie schon läuft. Arbeitsspeicher dabei 124 MB.
+  - *Nicht geprüft:* die App neben einem installierten Dienst (echter Befund, Hinweis von Windows, Symbolwechsel);
+    die Freigabe mit Admin-Abfrage; Lesen von `findings.db` als Benutzer ohne Schreibrecht im Datenordner (die
+    Tests laufen in einem eigenen Ordner); mehrere Benutzer; hohe Bildschirmskalierung.
+  - *Offen für Schritt 3:* `build.ps1 -Publish` und `install.ps1` für die Tray-App (Ort, Autostart für alle
+    Benutzer), `uninstall.ps1` (Autostart, laufende Tray-App, `tray-state.txt` des Benutzers), Profilverwaltung.

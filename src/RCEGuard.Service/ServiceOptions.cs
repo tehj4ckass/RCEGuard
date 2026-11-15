@@ -1,4 +1,3 @@
-using System.Text.Json;
 using RCEGuard.Core.Configuration;
 
 namespace RCEGuard.Service;
@@ -113,37 +112,5 @@ public sealed record ServiceOptions
     /// Loads the configuration. Without a configuration file the client the sensor was installed
     /// for (install-state.json) becomes the only profile, with an empty allowlist.
     /// </summary>
-    public GuardConfig LoadConfig(out string source)
-    {
-        var configPath = ConfigPath ?? Path.Combine(DataDirectory, "appsettings.json");
-        if (File.Exists(configPath))
-        {
-            source = configPath;
-            return GuardConfigJson.Parse(File.ReadAllText(configPath));
-        }
-
-        if (ConfigPath is not null)
-        {
-            throw new FileNotFoundException($"Configuration file not found: {ConfigPath}");
-        }
-
-        var statePath = Path.Combine(DataDirectory, "install-state.json");
-        if (!File.Exists(statePath))
-        {
-            throw new FileNotFoundException(
-                $"Neither '{configPath}' nor '{statePath}' exists. Run scripts\\install.ps1 first.");
-        }
-
-        using var state = JsonDocument.Parse(File.ReadAllText(statePath));
-        var clientPath = state.RootElement.TryGetProperty("clientPath", out var value) ? value.GetString() : null;
-        if (string.IsNullOrWhiteSpace(clientPath))
-        {
-            throw new FormatException($"'{statePath}' has no clientPath.");
-        }
-
-        source = statePath;
-        var config = new GuardConfig { Profiles = [new ClientProfile { Name = "Default", ClientPath = clientPath }] };
-        GuardConfigJson.Validate(config);
-        return config;
-    }
+    public GuardConfig LoadConfig(out string source) => GuardConfigFile.Load(DataDirectory, ConfigPath, out source);
 }

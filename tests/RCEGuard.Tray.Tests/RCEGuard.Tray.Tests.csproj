@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests of the tray application without its user interface: reading what the service stored, the
+    state shown, which findings are announced. The database of the tests is written by the store
+    of the service, so a change there that the tray application cannot read shows up here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- For drawing the icons of the notification area into a picture. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>RCEGuard.Tray.Tests</RootNamespace>
+    <!-- The rest of the solution runs without culture data; WPF cannot draw text without it
+         ("Cannot find non-neutral culture related to 'en-us'"). -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RCEGuard.Tray\RCEGuard.Tray.csproj" />
+    <ProjectReference Include="..\..\src\RCEGuard.Service\RCEGuard.Service.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+</Project>
