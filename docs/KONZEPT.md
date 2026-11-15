@@ -939,8 +939,8 @@ der Tray-App. (4) Abnahme.
   - *Ein Test ist einmal durchgefallen und ließ sich nicht wiederholen.* In einem Lauf von `build.ps1 -Publish`
     meldete die Dienst-Suite 80 von 81; welcher Test es war, ging in meiner gefilterten Ausgabe verloren. 17 weitere
     Läufe der ganzen Suite danach bestanden alle. Nicht geklärt.
-- **Schritt 4 (15.11.2026): Abnahme der Freigabe aus dem Fenster (`scripts\tray-test.ps1`).** Noch nicht als
-  Administrator gelaufen.
+- **Schritt 4 (15.11.2026): Abnahme der Freigabe aus dem Fenster (`scripts\tray-test.ps1`).** Als Administrator
+  bestanden (17:38, 9 von 9), siehe unten.
   - *Warum ein eigenes Skript mit einem Menschen am Bildschirm:* Die Freigabe besteht aus einem Klick im Fenster und
     der Admin-Abfrage von Windows. Beides bedient das Skript nicht (keine Fernsteuerung der Oberfläche, und die
     Admin-Abfrage soll ein Mensch beantworten). Es stellt den Zustand her, wartet und prüft danach.
@@ -965,5 +965,16 @@ der Tray-App. (4) Abnahme.
     allen Fällen war die Konfiguration danach die von vorher und keine Sicherung übrig. Echt und ohne Admin-Rechte:
     die laufende Tray-App wird gefunden und als nicht erhöht erkannt; `install-test.ps1 -ListOnly` läuft nach dem
     Verschieben der Funktion in beiden Versionen.
-  - *Nicht geprüft:* alles, was die Stellvertreter ersetzen, also der Klick, die Admin-Abfrage, der Freigabe-Befehl
-    aus der Tray-App und das Erkennen seines Elternprozesses.
+  - *Nicht geprüft (vor dem Lauf):* alles, was die Stellvertreter ersetzen, also der Klick, die Admin-Abfrage, der
+    Freigabe-Befehl aus der Tray-App und das Erkennen seines Elternprozesses.
+  - *Lauf als Administrator (15.11.2026, 17:38): ALL PASSED, 9 von 9.* Der Inhaber hat im Fenster freigegeben und
+    die Admin-Abfrage bestätigt. Ablauf nach `guard.log` und Ergebnisdatei: 17:38:16 Client beendet und Profil
+    `TrayTest` gesperrt (Regel für jede ausgehende Verbindung geschrieben); Freigabe 25 s nach Beginn des Wartens;
+    17:38:48 meldet der laufende Dienst „changed from outside“ und gleicht die Regeln ab; danach startet der Client
+    wieder; 17:38:51 läuft der Dienst wieder mit der Konfiguration von vorher. Die Tray-App (der Bau mit den
+    gebündelten Hinweisen) lief ohne Admin-Rechte. Beide Annahmen von oben haben sich bestätigt: Der Freigabe-Befehl
+    wurde laufend gesehen, und sein Elternprozess war `RCEGuard.Tray`. Zustand danach nachgesehen: Dienst und Sysmon
+    laufen, keine Regel von RCEGuard, `lockdown.json` leer, keine `appsettings.json`, eine Tray-App, nicht erhöht.
+  - *Weiter nicht geprüft:* der Autostart bei der Anmeldung; ein zweiter angemeldeter Benutzer; die Freigabe mit
+    einem Konto ohne Admin-Rechte (dann fragt Windows nach Name und Kennwort eines Administrators statt nach Ja oder
+    Nein); der echte Client.
