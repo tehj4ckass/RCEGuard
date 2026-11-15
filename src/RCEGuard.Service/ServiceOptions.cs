@@ -27,6 +27,9 @@ public sealed record ServiceOptions
     /// <summary>The profile whose lockdown is ended; null means every profile in lockdown.</summary>
     public string? ReleaseProfile { get; init; }
 
+    /// <summary>Send a test notification instead of running the guard.</summary>
+    public bool NotifyTest { get; init; }
+
     /// <summary>
     /// The event log to read. Always the Sysmon log; only tests read another one, because the
     /// Sysmon log needs administrator rights. Not a command line option.
@@ -38,6 +41,9 @@ public sealed record ServiceOptions
 
     /// <summary>Name of the file in the data folder that holds the position of the last handled event.</summary>
     public const string PositionFileName = "sysmon-position.json";
+
+    /// <summary>Name of the file in the data folder that is there while the guard runs.</summary>
+    public const string RunningMarkerName = "guard-running";
 
     /// <summary>Usage text for --help.</summary>
     public const string Usage =
@@ -52,6 +58,8 @@ public sealed record ServiceOptions
                                never terminates anything and needs no admin rights
           --release [profile]  end the lockdown of that profile (without a name: of every profile),
                                then exit; run it in a console started as administrator
+          --notify-test        send a test notification to the configured ntfy topic, then exit;
+                               needs no admin rights
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
@@ -80,6 +88,9 @@ public sealed record ServiceOptions
                     break;
                 case "--replay" when i + 1 < args.Length:
                     options = options with { ReplayPath = Path.GetFullPath(args[++i]) };
+                    break;
+                case "--notify-test":
+                    options = options with { NotifyTest = true };
                     break;
                 case "--release":
                     options = options with { Release = true };

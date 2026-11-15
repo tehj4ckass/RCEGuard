@@ -19,7 +19,7 @@ public sealed class LockdownTests : IDisposable
     /// A recorded "client started cmd.exe" (R1), with process ids no process can have (Windows only
     /// hands out multiples of four): the guard must find nothing to terminate on the machine of the test.
     /// </summary>
-    private const string ChildProcessEvent =
+    internal const string ChildProcessEventXml =
         """
         <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
           <System>
@@ -110,7 +110,7 @@ public sealed class LockdownTests : IDisposable
     {
         WriteConfig($$"""{"lockdown":true,"profiles":[{"name":"Test","clientPath":"{{Client.Replace(@"\", @"\\")}}"}]}""");
 
-        var lines = await RunAsync(Worker(Options(), ChildProcessEvent), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
+        var lines = await RunAsync(Worker(Options(), ChildProcessEventXml), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
 
         Assert.DoesNotContain(lines, line => line.Contains("cannot run"));
         Assert.Contains(lines, line => line.Contains("R1 CRITICAL") && line.Contains("locked down: the firewall blocks every outbound connection"));
@@ -124,7 +124,7 @@ public sealed class LockdownTests : IDisposable
     {
         WriteConfig($$"""{"profiles":[{"name":"Test","clientPath":"{{Client.Replace(@"\", @"\\")}}"}]}""");
 
-        var lines = await RunAsync(Worker(Options(), ChildProcessEvent), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
+        var lines = await RunAsync(Worker(Options(), ChildProcessEventXml), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
 
         Assert.Contains(lines, line => line.Contains("R1 CRITICAL"));
         var aboutLockdown = string.Join(" || ", lines.Where(line =>
@@ -143,7 +143,7 @@ public sealed class LockdownTests : IDisposable
     {
         WriteConfig($$"""{ {{killSetting}} "lockdown":true,"profiles":[{"name":"Test","clientPath":"{{Client.Replace(@"\", @"\\")}}"}]}""");
 
-        var lines = await RunAsync(Worker(Options(dryRun), ChildProcessEvent), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
+        var lines = await RunAsync(Worker(Options(dryRun), ChildProcessEventXml), logged => logged.Any(line => line.Contains("R1 CRITICAL")));
 
         Assert.Contains(lines, line => line.Contains("R1 CRITICAL") && line.Contains("would lock down the profile"));
         Assert.DoesNotContain(firewall.Rules, rule => rule.RemoteAddresses == "*");

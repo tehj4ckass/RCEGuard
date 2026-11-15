@@ -27,6 +27,32 @@ public sealed record GuardConfig
     /// Off by default. Like terminating, it does not happen while <see cref="KillEnabled"/> is false.
     /// </summary>
     public bool Lockdown { get; init; }
+
+    /// <summary>Where findings are reported besides the log and the database. Null: nowhere else.</summary>
+    public NotifyConfig? Notify { get; init; }
+}
+
+/// <summary>Notification settings.</summary>
+public sealed record NotifyConfig
+{
+    /// <summary>Push notifications through an ntfy server. Null: none.</summary>
+    public NtfyConfig? Ntfy { get; init; }
+}
+
+/// <summary>
+/// An ntfy topic that gets a message for every finding that alerts or terminates. The message
+/// leaves the machine: it names the rule, the program, the address or file, and the computer.
+/// </summary>
+public sealed record NtfyConfig
+{
+    /// <summary>If false, nothing is sent although the rest is filled in.</summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>Full address of the topic, e.g. https://ntfy.example.org/my-topic.</summary>
+    public string Url { get; init; } = string.Empty;
+
+    /// <summary>Access token of the ntfy server, if the topic needs one. Sent as "Authorization: Bearer".</summary>
+    public string? Token { get; init; }
 }
 
 /// <summary>One watched game client and the server it is allowed to talk to.</summary>
@@ -108,6 +134,16 @@ public static class GuardConfigJson
         if (config.RepeatWindowSeconds is < 0 or > 86400)
         {
             throw new FormatException($"repeatWindowSeconds must be between 0 and 86400, got {config.RepeatWindowSeconds}.");
+        }
+
+        if (config.Notify?.Ntfy is { Enabled: true } ntfy)
+        {
+            if (!Uri.TryCreate(ntfy.Url, UriKind.Absolute, out var topic)
+                || (topic.Scheme != Uri.UriSchemeHttp && topic.Scheme != Uri.UriSchemeHttps)
+                || topic.AbsolutePath.Trim('/').Length == 0)
+            {
+                throw new FormatException($"notify.ntfy.url must be the full address of a topic (http or https, e.g. https://ntfy.example.org/my-topic), got '{ntfy.Url}'.");
+            }
         }
 
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

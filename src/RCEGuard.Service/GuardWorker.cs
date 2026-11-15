@@ -4,6 +4,7 @@ using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using RCEGuard.Core.Configuration;
+using RCEGuard.Core.Notifications;
 using RCEGuard.Core.Rules;
 using RCEGuard.Core.Sysmon;
 
@@ -40,6 +41,13 @@ public sealed class GuardWorker : BackgroundService
     private HostAddressBook? hosts;
     private FirewallGuard? firewallGuard;
     private LockOnKill lockOnKill = LockOnKill.Off;
+    private INotifier notifier = NullNotifier.Instance;
+    private GuardConfig? loadedConfig;
+    private string? runningMarker;
+
+    /// <summary>Opens the notifier for an ntfy topic. Tests put one here that sends nothing over the network.</summary>
+    internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
+        (config, log) => new NtfyNotifier(config, log);
 
     /// <summary>Opens Windows Firewall. Tests put a stand-in here; the real one cannot be changed without administrator rights.</summary>
     internal Func<IFirewall> OpenFirewall { get; init; } = () => new WindowsFirewall();
@@ -79,10 +87,12 @@ public sealed class GuardWorker : BackgroundService
         try
         {
             await RunAsync(stoppingToken);
+            await OnStoppedAsync();
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Normal shutdown.
+            await OnStoppedAsync();
         }
         catch (Exception ex)
         {
@@ -92,7 +102,12 @@ public sealed class GuardWorker : BackgroundService
                 ex = cause;
             }
 
-            logger.LogCritical("RCEGuard cannot run: {Reason}", Explain(ex));
+            var reason = Explain(ex);
+            logger.LogCritical("RCEGuard cannot run: {Reason}", reason);
+            // This end is reported here; the next start must not report it again as "ended unexpectedly".
+            RemoveRunningMarker();
+            notifier.Send(NotificationText.CannotRun(reason, Environment.MachineName));
+            await notifier.FlushAsync(TimeSpan.FromSeconds(5));
             if (WindowsServiceHelpers.IsWindowsService())
             {
                 // Ending the process without reporting "stopped" is what Windows counts as a failure:
@@ -108,6 +123,7 @@ public sealed class GuardWorker : BackgroundService
     private async Task RunAsync(CancellationToken stoppingToken)
     {
         var config = options.LoadConfig(out var configSource);
+        loadedConfig = config;
         // A replay is about old events: their pids mean nothing any more, so it never terminates anything.
         var killEnabled = config.KillEnabled && !options.DryRun && options.ReplayPath is null;
         var engine = new RuleEngine(config, Environment.SystemDirectory);
@@ -138,6 +154,15 @@ public sealed class GuardWorker : BackgroundService
             return;
         }
 
+        if (config.Notify?.Ntfy is { Enabled: true } ntfy)
+        {
+            notifier = OpenNotifier(ntfy, (level, message) => logger.Log(level, "{Message}", message));
+            // Only the server: on an open ntfy server the name of the topic is all that keeps others out.
+            logger.LogInformation(
+                "Findings that alert or terminate are also sent to ntfy at {Server}",
+                Uri.TryCreate(ntfy.Url, UriKind.Absolute, out var topic) ? $"{topic.Scheme}://{topic.Authority}" : "(invalid address)");
+        }
+
         // Fail closed: the watcher itself accepts a missing or unreadable log and then just delivers nothing.
         // Asking for the log's properties and reading its ends throws in both cases.
         using (var session = new EventLogSession())
@@ -146,6 +171,7 @@ public sealed class GuardWorker : BackgroundService
         }
 
         var positionFile = new LogPositionFile(Path.Combine(options.DataDirectory, ServiceOptions.PositionFileName));
+        NoteStart(positionFile.Path);
         var plan = PlanResume(positionFile, out var newestAtStart);
 
         // The host names must be known before old events are evaluated, or their connections would all look unknown.
@@ -386,6 +412,11 @@ public sealed class GuardWorker : BackgroundService
 
             reported++;
             var rowId = store.Add(finding, taken);
+            // Not for a replay: its events are old.
+            if (killer is not null && NotificationText.Notifies(finding))
+            {
+                notifier.Send(NotificationText.ForFinding(finding, taken, late, Environment.MachineName));
+            }
             if (decision.Entry is { } entry)
             {
                 entry.Tag = rowId;
@@ -413,6 +444,81 @@ public sealed class GuardWorker : BackgroundService
         }
 
         return reported;
+    }
+
+    /// <summary>
+    /// Notes in the data folder that the guard is running, and says so if the note of the previous
+    /// run is still there: that run then did not stop the regular way (ended from outside, crashed,
+    /// power lost). A guard that is ended like that cannot report it itself; its next start does.
+    /// </summary>
+    private void NoteStart(string positionPath)
+    {
+        var marker = Path.Combine(options.DataDirectory, ServiceOptions.RunningMarkerName);
+        try
+        {
+            if (File.Exists(marker))
+            {
+                // The position is saved while events come in: its time is the last sign of life there is.
+                var signs = new[] { marker, positionPath }.Where(File.Exists).Select(path => new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero)).ToList();
+                DateTimeOffset? lastSeen = signs.Count > 0 ? signs.Max() : null;
+                logger.LogWarning(
+                    "RCEGuard did not stop the regular way last time (last sign of life: {LastSeen}). Reading what happened in between",
+                    lastSeen is { } time ? time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) : "unknown");
+                notifier.Send(NotificationText.EndedUnexpectedly(lastSeen, Environment.MachineName));
+            }
+
+            File.WriteAllText(marker, DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            runningMarker = marker;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("The note that RCEGuard is running could not be written to {Path}: {Reason}. An unexpected end will not be reported", marker, ex.Message);
+        }
+    }
+
+    private void RemoveRunningMarker()
+    {
+        if (runningMarker is null)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(runningMarker);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("The note that RCEGuard is running could not be removed from {Path}: {Reason}", runningMarker, ex.Message);
+        }
+
+        runningMarker = null;
+    }
+
+    /// <summary>The regular end: says so if a watched client is still running, and takes the running note away.</summary>
+    private async Task OnStoppedAsync()
+    {
+        if (runningMarker is not null && loadedConfig is not null)
+        {
+            try
+            {
+                var names = loadedConfig.Profiles.Select(profile => Path.GetFileName(profile.ClientPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var running = ProcessSnapshot.Take().Select(process => process.Name).Where(names.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                if (running.Count > 0)
+                {
+                    logger.LogWarning("RCEGuard is stopping while {Clients} is running: the client is not watched from now on", string.Join(", ", running));
+                    notifier.Send(NotificationText.StoppedWhileClientRuns(running, Environment.MachineName));
+                }
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                logger.LogWarning("Could not look whether a client is still running: {Reason}", ex.Message);
+            }
+        }
+
+        await notifier.FlushAsync(TimeSpan.FromSeconds(5));
+        RemoveRunningMarker();
+        (notifier as IDisposable)?.Dispose();
     }
 
     /// <summary>Resolves the host names again and tells the rule engine. Returns when to do it next.</summary>

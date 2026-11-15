@@ -15,6 +15,11 @@ if (options is null)
     return 2;
 }
 
+if (options.NotifyTest)
+{
+    return await NotifyTestCommand.RunAsync(options, Console.Out, Console.Error);
+}
+
 if (options.Release)
 {
     return await ReleaseCommand.RunAsync(options, new WindowsFirewall(), Console.Out, Console.Error);

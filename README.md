@@ -19,7 +19,7 @@ started under the name WowGuard.
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. A service that cannot start is removed again: `scripts\install-test.ps1` showed that on 2026-11-13 for a service build with a missing file and for a configuration that is not valid JSON (service, folder and event sources gone, sensor still there, nothing restarted by Windows), and a normal installation worked right after. **The same run ended with a half-removed Sysmon:** the Sysmon service crashed while `sysmon -u` was uninstalling it. A second `sysmon -u` could not finish the job either: the service that was left is protected by Windows and can only be removed by itself. `uninstall.ps1` now checks on the machine whether Sysmon is gone, tries once more, and for this dead end has the switch `-RemoveStuckSysmonService`. That way out worked on the test machine on 2026-11-14 (switch, restart of Windows, `uninstall.ps1` again): nothing of RCEGuard and Sysmon was left. Right after that `install-test.ps1` passed completely (2026-11-14 00:24, 21 of 21 checks): both failed starts, the installation without a fault, and the removal, this time without a crash of Sysmon. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | built and accepted with the simulator; **not tried with a real client**. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. `scripts\prevention-test.ps1` passed on the installed service on 2026-11-15 (20 of 20 checks): Windows Firewall took the rule, the allowed address connected and the other one did not, the lockdown blocked everything and was still there after a restart of the service, `--release` ended it, and no rule was left at the end. **Seen in that run:** a connection the firewall blocks leaves no finding, see "Blocking in advance". Not verified: `uninstall.ps1` with rules in place; the real client. Exploit Protection: `install.ps1 -BlockChildProcesses` turns on "Do not allow child processes" for the client, `-AllowChildProcesses` takes it back. Checked with the simulator on 2026-11-15 15:56 as part of `prevention-test.ps1` (27 of 27 checks): Windows refused when the simulator started a program, and after taking the setting back no entry was left and the guard terminated the started program again. A first run that day failed at taking it back (the documented `Set-ProcessMitigation -Remove -Disable` reported no error and changed nothing) and led to the scripts reading every change back and removing their own entry from the registry. `uninstall.ps1` takes the setting back too: `install-test.ps1` passed completely on 2026-11-15 15:58 (23 of 23 checks) with an installation that had it on; afterwards nothing of the installation was on the machine. Not verified: the real client with the setting. Plan and decisions: `docs/KONZEPT.md` section 15 |
-| M4 | Tray UI, toast, ntfy, heartbeat | open |
+| M4 | Tray UI, toast, ntfy, heartbeat | started. Built: the service sends findings that alert or terminate to an ntfy topic, and reports about itself (cannot run, was ended unexpectedly, stopped while the client runs); `RCEGuard.Service.exe --notify-test` sends a test message. Tested with a stand-in for the network, and the published service sent a real test message to a listener on the test machine. **Not yet run:** the installed service with a real ntfy server. Not built yet: the tray application and toasts. Plan and decisions: `docs/KONZEPT.md` section 16 |
 | M5 | Learning mode, R7, R8 | open |
 
 Right now the guard evaluates events, terminates the client on critical findings and writes every
@@ -144,6 +144,7 @@ Windows service is running: two guards would both act on every event):
 | `--data-dir <folder>` | data folder, default `C:\ProgramData\RCEGuard` |
 | `--replay <file>` | evaluate a saved events file instead of the live log, then exit; never terminates anything, needs no admin rights |
 | `--release [profile]` | end the lockdown of that profile (without a name: of every profile), then exit; see "Blocking in advance" |
+| `--notify-test` | send a test notification to the configured ntfy topic, then exit; needs no admin rights; see "Notifications" |
 
 Without `appsettings.json` the client the sensor was installed for is the only profile, with an
 empty allowlist: every connection of the client is then an R2 alert. A configuration looks like
@@ -244,6 +245,57 @@ right before the client ends may be. Blocking unknown addresses in advance is th
 firewall rules in M3.
 
 The guard stops with an error instead of idling if it cannot read the Sysmon log.
+
+### Notifications (ntfy)
+
+Without this the findings are only in `guard.log` and `findings.db`. With an
+[ntfy](https://ntfy.sh) topic in the configuration the service also sends them to your phone:
+
+```json
+{
+  "notify": { "ntfy": { "url": "https://ntfy.example.org/my-topic", "token": "tk_..." } },
+  "profiles": [ { "name": "Warmane", "clientPath": "D:\\Games\\Warmane\\Wow.exe" } ]
+}
+```
+
+`token` is only needed if the server asks for one; `"enabled": false` turns the entry off
+without deleting it. Then, as any user:
+
+```powershell
+& 'C:\Program Files\RCEGuard\RCEGuard.Service.exe' --notify-test
+```
+
+It sends one test message and says whether the server took it. The service reads the
+configuration when it starts, so restart it (or run `install.ps1` again) after changing it.
+
+What is sent:
+
+- every finding that alerts or terminates (severity high or critical), with the rule, the
+  summary, what the guard did, the time and the name of the computer. Findings that are only
+  logged are not sent, and a repeated alert is sent as often as it is reported, not as often as
+  it happens (see "Repeated alerts");
+- "RCEGuard cannot run", with the reason, before the guard ends because it cannot do its work;
+- "RCEGuard was ended unexpectedly" at the next start, if the guard was not stopped the regular
+  way (ended from outside, crashed, power lost). A guard that is ended like that cannot report
+  it itself; it leaves a note in the data folder while it runs and finds it again;
+- "RCEGuard is stopping while the client runs", if the service is stopped while a program with
+  the name of a watched client is running.
+
+What to know:
+
+- **The message leaves the machine.** It names programs, files and addresses, which can
+  contain your Windows user name, and the computer name. Use a server and a topic you trust. On
+  a public server such as ntfy.sh everyone who knows the topic name can read along.
+- **Every user of this PC can read the configuration**, the topic address and the token
+  included (the data folder is readable for all, so that the tray application can show the
+  findings). Someone with that can send messages to the topic. Use a token that may only
+  publish to this one topic.
+- The log names the server, never the topic or the token.
+- A message that cannot be delivered is tried three times and then given up; the log says so
+  once per outage and counts the rest. At most 100 messages wait at a time; when more pile up,
+  the oldest are dropped. The findings themselves are always in the log and the database.
+- Nothing is sent that tells you the guard is alive. If the service is disabled or removed by
+  someone with administrator rights, no message comes.
 
 ### Blocking in advance (firewall and lockdown)
 

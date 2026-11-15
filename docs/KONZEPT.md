@@ -762,3 +762,61 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
   Exploit Protection).
   Entscheidungen des Inhabers: ob gesperrte Verbindungen und abgewiesene Programmstarts aus den Windows-Logs gelesen
   und gemeldet werden; ob der Simulator ein Fensterprogramm wird; was in M3 Standard wird, sobald die Tray-App da ist.
+
+## 16. Entscheidungen bei der Umsetzung von M4
+
+**Schritte.** (1) Benachrichtigungen über ntfy aus dem Dienst, dazu die Meldungen des Dienstes über sich selbst
+(Heartbeat). (2) Tray-App: Status, Alarmliste, Toasts, Sperre anzeigen und freigeben. (3) Profilverwaltung und Autostart
+der Tray-App. (4) Abnahme.
+
+- **Schritt 1 (15.11.2026): ntfy und Heartbeat.** Noch nicht mit einem echten ntfy-Server und nicht im installierten
+  Dienst gelaufen.
+  - *Was gesendet wird:* jeder Befund, der alarmiert oder beendet (`NotificationText.Notifies`), nachdem das
+    Entprellen ihn durchgelassen hat; Priorität „urgent“ für KRITISCH, „high“ für HOCH. Nur protokollierte Befunde
+    (MITTEL, INFO) nicht. Ein Replay sendet nichts (alte Ereignisse), ein Trockenlauf (`--dry-run`) schon: Er meldet
+    ja, nur beendet er nichts.
+  - *Versand im Hintergrund (`NtfyNotifier`).* Die Wächter-Schleife übergibt nur; gesendet wird aus einer Warteschlange
+    (100 Einträge, bei Überlauf fallen die ältesten weg). Drei Versuche (sofort, nach 2 s, nach 10 s), 10 s Wartezeit
+    je Versuch. Ein Ausfall steht einmal im Log, das Ende des Ausfalls mit der Zahl der verlorenen Meldungen. Beim
+    Beenden wartet der Dienst höchstens 5 s auf offene Meldungen.
+  - *Heartbeat ohne Lebenszeichen.* Abschnitt 7 verlangt einen Alarm, wenn der Client läuft und der Dienst nichts
+    mehr sieht oder Sysmon gestoppt ist. Regelmäßige „lebt noch“-Meldungen wären dafür das übliche Mittel, brauchen
+    aber einen zweiten Dienst, der ihr Ausbleiben bemerkt, und schlügen bei jedem Ausschalten des Rechners an.
+    Gebaut ist stattdessen, was der Dienst selbst wissen kann:
+    - *kann nicht arbeiten* (Sysmon-Log weg oder stumm, Konfiguration kaputt): Meldung vor dem Beenden;
+    - *unsauber beendet* (von außen beendet, abgestürzt, Strom weg): Der Dienst legt beim Start `guard-running` in
+      den Datenordner und löscht die Datei beim regulären Ende. Findet der nächste Start sie vor, meldet er das, mit
+      der letzten bekannten Lebenszeit (Änderungszeit von `sysmon-position.json`). Windows startet den Dienst nach
+      5 s neu, die Meldung kommt also kurz nach dem Vorfall;
+    - *gestoppt, während der Client läuft:* Beim regulären Stopp sieht der Dienst in der Prozessliste nach einem
+      Programm mit dem Dateinamen eines überwachten Clients. Wird Sysmon gestoppt, stoppt Windows auch RCEGuard
+      (Abhängigkeit); dieser Fall ist damit abgedeckt. Beim Herunterfahren von Windows sind die Programme des
+      Benutzers vorher beendet, dann kommt keine Meldung.
+    - *Grenze:* Wer den Dienst mit Admin-Rechten deaktiviert oder entfernt, bekommt keine Meldung ausgelöst
+      (Abschnitt 2: kein Schutz gegen Angreifer mit Admin-Rechten). Ein Lebenszeichen an einen Überwachungsdienst
+      (z. B. eine URL, die regelmäßig abgerufen wird) wäre dafür die Ergänzung; Entscheidung des Inhabers.
+  - *Die Konfiguration ist für alle Benutzer lesbar,* also auch Topic und Token (der Datenordner ist seit M2 lesbar,
+    damit die Tray-App die Befunde zeigen kann). Wer mit Benutzerrechten läuft, kann damit ins Topic schreiben. Nicht
+    gelöst, sondern dokumentiert: ein Token, das nur in dieses eine Topic schreiben darf. Eine eigene, nur für
+    Administratoren lesbare Datei für das Token wäre die Alternative; Entscheidung des Inhabers. Im Log steht nur der
+    Server, nie Topic oder Token.
+  - *Inhalt verlässt den Rechner:* Regel, Zusammenfassung (Programme, Dateien, Adressen; darin kann der
+    Windows-Benutzername stehen), Aktion, Zeit, Computername. Im README genannt.
+  - *`--notify-test`:* sendet eine Testmeldung und sagt, ob der Server sie angenommen hat; ohne Admin-Rechte.
+  - *Geprüft:* 198 Kern- und 81 Dienst-Tests bestanden (je 14 neue): Texte und Prioritäten, Konfiguration; Versand
+    gegen einen Stellvertreter für das Netz (Kopfzeilen, Token, Wiederholung, Ausfall einmal im Log und ohne
+    Topic/Token, Antwort 403); die Wächter-Schleife (Befund wird gesendet, ohne Topic nichts, unsauberes Ende wird
+    beim nächsten Start gemeldet und danach nicht mehr, „kann nicht arbeiten“, Stopp bei laufendem „Client“ mit einem
+    echten `cmd.exe` als Stellvertreter). Der veröffentlichte Dienst hat mit `--notify-test` eine echte HTTP-Anfrage
+    an einen Empfänger auf dem Testrechner geschickt: POST auf das Topic, `Title`, `Priority`, `Tags`,
+    `Authorization: Bearer`, Text als UTF-8.
+  - *Nicht geprüft:* ein echter ntfy-Server (nimmt er die Kopfzeilen so, kommt die Meldung auf dem Telefon an); der
+    installierte Dienst als `LocalSystem` (Netzzugriff, Namensauflösung); das Verhalten beim Herunterfahren von
+    Windows.
+- **Tray-App liest, statt zu fragen (für Schritt 2 vorgesehen).** Abschnitt 3 zeichnet eine Named Pipe zwischen
+  Dienst und Tray-App. Geplant ist, dass die Tray-App stattdessen die Dateien liest, die der Dienst ohnehin für alle
+  lesbar ablegt (`findings.db`, `guard.log`, `lockdown.json`), und den Zustand von Dienst und Firewall abfragt. Dann
+  bekommt der Dienst (`LocalSystem`) keine Schnittstelle, über die ein Programm mit Benutzerrechten ihm etwas sagen
+  kann. Freigeben einer Sperre bliebe ein Befehl mit Admin-Rechten (die Tray-App startet ihn mit Abfrage der
+  Benutzerkontensteuerung): Könnte die Tray-App ohne Admin-Rechte freigeben, könnte es auch Schadcode mit
+  Benutzerrechten. Beides sind Entscheidungen, die der Inhaber vor Schritt 2 kippen kann.
