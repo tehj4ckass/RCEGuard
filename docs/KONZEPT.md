@@ -1247,7 +1247,7 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
 
 - *Simulator:* `--connect ... --keep-open --hold N` lässt die Verbindung bis zum Ende des Prozesses offen und sagt
   am Ende, ob sie noch offen war oder von der Gegenseite geschlossen wurde. Gesendet wird nichts.
-- *Skript (15.11.2026), noch nicht als Administrator gelaufen:* Profil im Lernmodus (R2 ist dann ein Logeintrag,
+- *Skript (15.11.2026):* Profil im Lernmodus (R2 ist dann ein Logeintrag,
   es kommt keine Benachrichtigung), dann abwechselnd zehnmal „sofort geschlossen“ und zehnmal „offen gehalten“,
   reihum zu drei Adressen, jeder Client 8 s am Leben. Nach jeder Verbindung fragt es das Sysmon-Log nach einem
   Ereignis 3 mit der PID des Clients (bis 4 s nach dessen Ende, also 12 s nach der Verbindung). Ergebnis: jede
@@ -1265,3 +1265,33 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
   15.11.2026 um 20:24 als Administrator gelaufen); der Lauf selbst.
 - *Was die Messung nicht klärt:* warum Sysmon Verbindungen auslässt. Sie sagt nur, ob es an der Dauer der
   Verbindung hängt.
+- *Lauf als Administrator (15.11.2026, 20:35 bis 20:38):* 20 Verbindungen, alle zustande gekommen, alle „offen
+  gehaltenen“ waren am Ende noch offen.
+
+  | Art | aufgezeichnet |
+  | :--- | :--- |
+  | sofort geschlossen | 9 von 10 |
+  | 8 s offen gehalten | 8 von 10 |
+
+  - *Ergebnis:* Offenhalten schließt die Lücke nicht. Zwei Verbindungen, die 8 s offen standen, fehlen im
+    Sysmon-Log. Der Unterschied zwischen den Arten (eine gegen zwei) sagt bei je zehn nichts.
+  - *Der Wächter verliert nichts:* 17 Verbindungen von Sysmon aufgezeichnet, 17 vom Wächter gemeldet.
+  - *Aufgezeichnete Ereignisse* standen 1,3 bis 2,2 s nach dem Start des Clients im Log, wie bisher gemessen.
+  - *Die Ausfälle kommen gehäuft:* hier 20:36:08 und 20:36:20 hintereinander und 20:37:46; im zweiten
+    Abnahmelauf vier hintereinander (20:23:04 bis 20:23:41) und einer; im ersten die beiden ersten. Über alle drei
+    Läufe 24 von 34 aufgezeichnet, mit Quoten von 2 von 5, 4 von 9 und 17 von 20. Das sieht nach Zeitabschnitten
+    aus, in denen Sysmon keine Verbindungen schreibt, nicht nach einem Zufall je Verbindung. Vermutung, nicht
+    belegt. In allen drei Läufen lief das Spiel des Inhabers; ob das eine Rolle spielt, ist nicht gemessen.
+  - *Nicht geklärt:* die Ursache; ob Sysmon eine Verbindung, die es beim Aufbau verpasst hat, je nachträgt (das
+    Skript wartet bis 12 s nach dem Aufbau, im Abnahmelauf lag das ganze Log vor: dort kam nichts nach).
+  - *Folgen:* R2 und der Lernmodus sehen die meisten Verbindungen des Clients, nicht alle. Für den Lernmodus heißt
+    das: Der Vorschlag kann eine Adresse auslassen, mit der sich der Client verbunden hat. Wird danach die
+    Firewall-Regel des Profils eingeschaltet, ist diese Adresse blockiert, und eine blockierte Verbindung meldet
+    der Wächter nicht (Abschnitt 15). Für R2 heißt es: Eine Verbindung zu einer fremden Adresse kann unbemerkt
+    bleiben; die Firewall-Regel blockiert sie trotzdem, sie hängt nicht an Sysmon.
+  - *Möglicher Ausweg, nicht gebaut:* Der Dienst fragt zusätzlich die Verbindungstabelle von Windows ab
+    (`GetExtendedTcpTable` mit der PID des Besitzers; das, was `netstat -o` zeigt), für die Clients, die er für R8
+    ohnehin kennt. Dafür wird der Client nicht geöffnet. Eine Verbindung, die länger steht als der Abstand der
+    Abfragen (die des Spiels zum Server steht die ganze Sitzung), fände er so auch dann, wenn Sysmon sie verpasst
+    hat; sehr kurze Verbindungen fängt weiter nur Sysmon. Beide Quellen zusammen deckten ab, was eine allein
+    auslässt.
