@@ -916,6 +916,19 @@ der Tray-App. (4) Abnahme.
     Inhaber abgebrochen; eine Messung liegt nicht vor. Seine Rückmeldung dazu: Die Auswahl funktionierte. Ob der
     Hinweis des Nachstellens zu dem Zeitpunkt schon gezeigt war, ist offen. Belegt ist damit nur: Die Auswahl an
     sich geht auf dem Rechner; nicht belegt bleibt, was sie im Testlauf blockiert hat.
+  - *Nachgestellt vom Inhaber (15.11.2026, 17:27), mit einem Versuchsskript außerhalb des Repos:* Auswahl öffnen,
+    nach 3 s eine Benachrichtigung von einem eigenen Symbol (dieselbe Art wie die der Tray-App), dabei den
+    Tastaturfokus mitschreiben. Mit einer Benachrichtigung und mit einer Serie von vier (alle 3 s) ließ sich die
+    Auswahl benutzen. Mitschrift der Serie: Die Auswahl (`SnippingTool`) hatte den Fokus ab 0,6 s und behielt ihn
+    über die erste Benachrichtigung (3,1 s) hinweg bis 6,1 s; dann ging er an die Konsole zurück (die Auswahl war
+    getroffen). Belegt für diesen Aufbau: Eine Benachrichtigung allein nimmt der Auswahl den Fokus nicht.
+  - *Damit bleibt als Unterschied zum Testlauf, nicht belegt:* Dort lief gleichzeitig `install.ps1`
+    (17:17:58 bis 17:18:03), das die Tray-App beendet und über den Explorer neu startet; die Benachrichtigung eines
+    gerade beendeten Programms bleibt stehen, und die neu gestartete App meldet sofort. Das passiert nur bei einer
+    Installation, nicht im Betrieb. Nicht weiter verfolgt, solange es im Betrieb nicht wieder auftritt.
+  - *Offen aus der Mitschrift:* Nach der Auswahl ging der Fokus zweimal an `ShellExperienceHost`, 1,7 s und 1,3 s
+    nach der dritten und vierten Benachrichtigung. Ob das Klicks des Inhabers waren oder ob eine Benachrichtigung
+    den Fokus von sich aus nimmt, ist nicht festgestellt. Das zweite wäre für ein Spiel im Vollbild von Belang.
   - *Hinweise gebündelt.* Unabhängig von der Ursache war die Serie zu viel: höchstens ein Hinweis in zehn Sekunden
     (`MainViewModel.ToastPause`); was dazwischen kommt, wird danach gemeinsam gemeldet. Symbol und Liste folgen
     sofort. Test mit gestellter Uhr nach dem Muster des Laufs.
