@@ -657,8 +657,8 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     über ihren Namen entfernt; eine fremde Regel mit genau dem Namen `RCEGuard: <Profil>` außerhalb der Gruppe könnte
     dabei statt der eigenen getroffen werden. Eine Sperre, die nicht in die Datei geschrieben werden konnte, endet
     mit dem nächsten Abgleich.
-- **Schritt 3 (15.11.2026): Exploit Protection.** Einschalten am echten System bestätigt, Zurücknehmen dort
-  gescheitert und danach umgebaut (siehe „Lauf als Administrator“ unten); der Umbau lief noch nicht als Administrator.
+- **Schritt 3 (15.11.2026): Exploit Protection.** Abnahme mit dem Simulator bestanden (zweiter Lauf, 15:56); der
+  erste Lauf scheiterte am Zurücknehmen und führte zum Umbau (beides unten).
   - *Nur eine Einstellung:* „Do not allow child processes“ (`DisallowChildProcessCreation`) für den vollen Pfad des
     Clients, über `Set-ProcessMitigation`. Abschnitt 5 nennt den Programmnamen (`-Name Wow.exe`); der würde jede
     `Wow.exe` des Rechners treffen. Microsoft dokumentiert den vollen Pfad für genau diese Einstellung
@@ -738,3 +738,21 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
       mit passendem Pfad und keinen weiteren Wert am Schlüssel `Wow.exe`.
     - *Nicht geprüft:* das Löschen in der echten Registry (braucht Admin-Rechte); ob `-Disable` für einen Pfad
       wirkt; der echte Client.
+  - *Zweiter Lauf als Administrator (15.11.2026, 15:56): ALL PASSED, 27 von 27.* Vorher hat
+    `install.ps1 -AllowChildProcesses` den hängengebliebenen Zustand vom ersten Lauf abgeräumt: Einstellung „nicht
+    gesetzt“, kein Eintrag, Schlüssel `Image File Execution Options\Wow.exe` weg, Statusdatei ohne Pfad. Im Test
+    dann der ganze Weg: einschalten (`ON`), der Simulator läuft und verbindet in der Konsole des Tests, `--spawn`
+    wird abgewiesen („Die Prozesserstellung wurde blockiert“), kein R1-Befund; nach `-AllowChildProcesses` „nicht
+    gesetzt“, kein Eintrag (Registry: Schlüssel nicht mehr vorhanden), und der Wächter beendet das gestartete
+    Programm wieder (R1 nach 1,0 s). Mit eigener Konsole lief der Simulator unter der Einstellung wieder nicht
+    (`0xC0000142`). Windows hat beide Abweisungen als Ereignis 4 protokolliert, diesmal schon beim Auslesen drei
+    Sekunden später, mit Programm und Befehlszeile (`"cmd.exe" /c ping -n 9 127.0.0.1 > nul`).
+  - *Nicht festgestellt:* welcher der Schritte den Eintrag entfernt hat (`-Disable` und danach die Registry, oder
+    die Registry allein); die Ausgabe von `install.ps1` aus dem Lauf liegt nicht vor. Am Ergebnis ändert das nichts.
+  - *Weiter nicht geprüft:* `uninstall.ps1` mit gesetzter Einstellung (das prüft `install-test.ps1`, Schritte C und
+    D, auf einem Rechner ohne RCEGuard); der echte Client mit der Einstellung (Abschnitt 12).
+- **Stand M3 (15.11.2026):** Schritte 1 bis 3 gebaut und mit dem Simulator am installierten Dienst abgenommen. Offen:
+  `install-test.ps1` einmal vollständig mit dem neuen Schritt C; `uninstall.ps1` mit vorhandenen Firewall-Regeln;
+  Hostnamen im installierten Dienst; der echte Client (Firewall mit echter Allowlist, Sperre, Exploit Protection).
+  Entscheidungen des Inhabers: ob gesperrte Verbindungen und abgewiesene Programmstarts aus den Windows-Logs gelesen
+  und gemeldet werden; ob der Simulator ein Fensterprogramm wird; was in M3 Standard wird, sobald die Tray-App da ist.
