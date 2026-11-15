@@ -22,6 +22,12 @@ internal static class Program
     /// <summary>Seconds to stay alive after the scenario (--hold), so a guard has time to terminate this process.</summary>
     private static int holdSeconds;
 
+    /// <summary>With --keep-open: the connection of --connect stays open until this process ends.</summary>
+    private static bool keepOpen;
+
+    /// <summary>The connection that is kept open; held here so that nothing closes it early.</summary>
+    private static TcpClient? openConnection;
+
     private static int Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "/?")
@@ -31,6 +37,12 @@ internal static class Program
         }
 
         holdSeconds = TakeOption(ref args, "--hold", whenBare: 15) ?? 0;
+        var keepIndex = Array.IndexOf(args, "--keep-open");
+        if (keepIndex > 0)
+        {
+            keepOpen = true;
+            args = [.. args[..keepIndex], .. args[(keepIndex + 1)..]];
+        }
         var runs = Math.Clamp(TakeOption(ref args, "--repeat", whenBare: 3) ?? 1, 1, 100);
 
         var exitCode = 0;
@@ -52,6 +64,17 @@ internal static class Program
 
         Console.WriteLine($"Staying alive for {holdSeconds} s so a guard can terminate this process ...");
         Thread.Sleep(TimeSpan.FromSeconds(holdSeconds));
+        if (openConnection is not null)
+        {
+            // Readable with nothing to read means the other side has closed.
+            var socket = openConnection.Client;
+            var closedByRemote = !socket.Connected || (socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
+            Console.WriteLine(closedByRemote
+                ? "The connection was closed by the other side in the meantime."
+                : $"The connection was still open after {holdSeconds} s.");
+            openConnection.Dispose();
+        }
+
         Console.WriteLine("NOT TERMINATED: nothing stopped this process.");
         return 3;
     }
@@ -141,6 +164,8 @@ internal static class Program
             Add '--hold [seconds]' (default 15) after a scenario to keep this process, and for
             --spawn its child and for --detach the left-behind program, running: a guard then has
             something left to terminate.
+            Add '--keep-open' to --connect (with --hold) to leave the connection open until the
+            process ends, instead of closing it right after it is made.
             Add '--repeat [count]' (default 3) to run the scenario several times in this one
             process: a guard should report the same alert once and count the rest.
             Exit codes: 0 scenario done, 1 scenario blocked, 3 held and not terminated.
@@ -243,13 +268,30 @@ internal static class Program
 
         var host = endpoint[..separator];
         Console.WriteLine($"R2: connecting to {host}:{port}.");
-        using var client = new TcpClient();
-        if (!client.ConnectAsync(host, port).Wait(TimeSpan.FromSeconds(5)))
+        var client = new TcpClient();
+        try
         {
-            throw new TimeoutException($"No connection to {host}:{port} within 5 s.");
-        }
+            if (!client.ConnectAsync(host, port).Wait(TimeSpan.FromSeconds(5)))
+            {
+                throw new TimeoutException($"No connection to {host}:{port} within 5 s.");
+            }
 
-        Console.WriteLine("Connected; closing again without sending data.");
+            if (keepOpen)
+            {
+                // The game keeps its connection to the server for the whole session; this is the closest the
+                // simulator comes to that. Nothing is sent.
+                Console.WriteLine("Connected; keeping the connection open without sending data.");
+                openConnection = client;
+                client = null;
+                return;
+            }
+
+            Console.WriteLine("Connected; closing again without sending data.");
+        }
+        finally
+        {
+            client?.Dispose();
+        }
     }
 
     private static void Drop()

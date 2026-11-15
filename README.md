@@ -70,7 +70,7 @@ C:\RCEGuardTest\Wow.exe --spawn
 | Switch | What it does | Expected event |
 | :--- | :--- | :--- |
 | `--spawn` | starts `cmd.exe /c echo` | id 1, rule `R1` |
-| `--connect [host:port]` | opens a TCP connection (default `1.1.1.1:443`) | id 3, rule `R2` |
+| `--connect [host:port]` | opens a TCP connection (default `1.1.1.1:443`) and closes it at once; with `--keep-open` (and `--hold`) it stays open until the process ends | id 3, rule `R2` |
 | `--drop` | creates and deletes `%APPDATA%\rceguard-test.exe` | id 11, rule `R3` |
 | `--runkey` | sets and removes an `HKCU\...\Run` value | id 13 (set) and id 12 (delete), rule `R4` |
 | `--cpu [seconds]` | full load on all cores (default 300 s) | none: R8 is not an event, the service measures the processor time of the client |
@@ -663,6 +663,22 @@ At the end the configuration and the notes from before the test are back. The ho
 machine needs at least two cores. The tray application shows notifications while the test runs.
 The result goes to `out\m5-result.txt`, the Sysmon events of the run to `out\m5-events.xml`.
 
+### Sensor probe
+
+```powershell
+.\scripts\sensor-probe.ps1
+```
+
+A measurement, not a test of the guard: how reliably does Sysmon record the connections of the
+test client? Run in an administrator PowerShell with an internet connection and RCEGuard
+installed for the test client; it installs nothing and does not touch the configuration of
+Sysmon. With the test profile in learning mode (so that no alert comes up) the simulator
+connects ten times and closes the connection at once, and ten times and keeps it open, taking
+turns, each client alive for 8 s (`-Count`, `-HoldSeconds`, `-Addresses`). After each one the
+script asks the Sysmon log whether the connection is in there. The result
+(`out\sensor-probe-result.txt`) lists every connection and counts per kind; it also says
+whether the guard reported as many connections as Sysmon recorded. About four minutes.
+
 ## Monitoring the real client
 
 To monitor the real client instead, run `install.ps1` again with its path, for example
@@ -777,6 +793,7 @@ scripts/install-test.ps1               install with a service that cannot start,
 scripts/prevention-test.ps1            firewall rule, lockdown, release and Exploit Protection against the installed service (admin, needs internet)
 scripts/tray-test.ps1                  tray application without administrator rights, release of a lockdown from its window (admin, with a person at the screen)
 scripts/learning-test.ps1              learning mode with its suggestion, R7 and R8 against the installed service (admin, needs internet)
+scripts/sensor-probe.ps1               measures which connections of the test client Sysmon records: closed at once or kept open (admin, needs internet)
 src/RCEGuard.Core/                     rule engine, event parser, configuration, firewall rule planning (no OS dependencies)
 src/RCEGuard.Service/                  guard: Sysmon log reader, actions, findings database, firewall rules and lockdown
 src/RCEGuard.Tray/                     tray application: icon, findings window, pop-ups; only reads

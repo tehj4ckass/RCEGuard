@@ -1238,3 +1238,30 @@ Abschnitt 12 als Ergänzung außerhalb des Projekts nennt). Nachgelesen am Quell
   dem Patchen also nachsehen, dass dort `0xE0` steht und es der Abschnitt `.zdata` ist. Ob ein Server eine
   geänderte Client-Datei beanstandet, sagen die Projekte nicht; geprüft ist es nicht.
 - *Der Client des Inhabers ist nicht gepatcht* (dort steht `0xE0`).
+
+## 19. Messung: Welche Verbindungen zeichnet Sysmon auf? (`scripts\sensor-probe.ps1`)
+
+Anlass: In den beiden Abnahmeläufen von M5 hat Sysmon 7 von 14 Verbindungen des Testclients aufgezeichnet
+(Abschnitt 17), obwohl jeder Client 8 s lebte. Der Simulator hat die Verbindung dabei immer sofort geschlossen.
+Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird; so verhält sich das Spiel.
+
+- *Simulator:* `--connect ... --keep-open --hold N` lässt die Verbindung bis zum Ende des Prozesses offen und sagt
+  am Ende, ob sie noch offen war oder von der Gegenseite geschlossen wurde. Gesendet wird nichts.
+- *Skript (15.11.2026), noch nicht als Administrator gelaufen:* Profil im Lernmodus (R2 ist dann ein Logeintrag,
+  es kommt keine Benachrichtigung), dann abwechselnd zehnmal „sofort geschlossen“ und zehnmal „offen gehalten“,
+  reihum zu drei Adressen, jeder Client 8 s am Leben. Nach jeder Verbindung fragt es das Sysmon-Log nach einem
+  Ereignis 3 mit der PID des Clients (bis 4 s nach dessen Ende, also 12 s nach der Verbindung). Ergebnis: jede
+  Verbindung einzeln, Zählung je Art, und ob der Wächter so viele Verbindungen gemeldet hat, wie Sysmon
+  aufgezeichnet hat. Es installiert nichts und lädt die Sysmon-Konfiguration nicht neu. Konfiguration und Notizen
+  des Lernmodus stehen danach wieder da.
+- *Es ist eine Messung, kein Test:* Es gibt kein „bestanden“. Abbruch (Exit-Code 1) nur, wenn etwas nicht lief oder
+  keine einzige Verbindung zustande kam.
+- *Geprüft, mit Stellvertretern in PowerShell 7 und 5.1* (Simulator, Sysmon-Log und Dienst ersetzt, alle Antworten
+  ausgedacht): vier Varianten (jede zweite „sofort geschlossene“ fehlt; keine Verbindung möglich; Wächter meldet
+  eine weniger; Simulator scheitert beim dritten Aufruf). Zählung und Aufräumen stimmen in allen. Echt und ohne
+  Admin-Rechte: Der neue Simulator hält eine Verbindung zu `1.1.1.1:443` 3 s offen („still open“), aus einem
+  Ordner, den Sysmon nicht überwacht.
+- *Nicht geprüft:* die Abfrage des Sysmon-Logs im Skript (dieselbe Form wie in `learning-test.ps1`, dort am
+  15.11.2026 um 20:24 als Administrator gelaufen); der Lauf selbst.
+- *Was die Messung nicht klärt:* warum Sysmon Verbindungen auslässt. Sie sagt nur, ob es an der Dauer der
+  Verbindung hängt.

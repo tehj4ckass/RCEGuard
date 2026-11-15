@@ -135,8 +135,8 @@ function Get-SensorConnections([datetime] $since) {
 
 function Get-SensorReloadTime {
     # When Sysmon last loaded its configuration (event 16); install.ps1 makes it do that.
-    $event = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Sysmon/Operational'; Id = 16 } -MaxEvents 1 -ErrorAction SilentlyContinue
-    if ($null -ne $event) { $event.TimeCreated } else { $null }
+    $record = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Sysmon/Operational'; Id = 16 } -MaxEvents 1 -ErrorAction SilentlyContinue
+    if ($null -ne $record) { $record.TimeCreated } else { $null }
 }
 
 function Restart-Guard {
