@@ -18,6 +18,10 @@
          with rights to change it alerts, and a started program is terminated,
       5. puts the configuration back as it was and saves the recorded Sysmon events.
 
+    Sysmon does not record every connection (see README, "Running the guard"). The script asks
+    the Sysmon log after each connection whether it is in there and tries up to three times; what
+    was not recorded is listed in the result, apart from the checks of the guard.
+
     Needs an administrator PowerShell and an internet connection. Publish first with
     '.\build.ps1 -Publish' and the simulator to the test folder (see README). Windows shows
     notifications of the tray application while the test runs. The result goes to
@@ -120,7 +124,19 @@ function Invoke-Client([string[]] $arguments, [int] $timeoutSeconds = 0) {
     }
     $text = [string] (Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue)
     Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
-    [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $text }
+    [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $text; ProcessId = $process.Id }
+}
+
+function Get-SensorConnections([datetime] $since) {
+    # The pids of the processes whose connections Sysmon recorded since then (event 3).
+    @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Sysmon/Operational'; Id = 3; StartTime = $since } -ErrorAction SilentlyContinue |
+        ForEach-Object { [int] ((([xml] $_.ToXml()).Event.EventData.Data | Where-Object { $_.Name -eq 'ProcessId' }).'#text') })
+}
+
+function Get-SensorReloadTime {
+    # When Sysmon last loaded its configuration (event 16); install.ps1 makes it do that.
+    $event = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Sysmon/Operational'; Id = 16 } -MaxEvents 1 -ErrorAction SilentlyContinue
+    if ($null -ne $event) { $event.TimeCreated } else { $null }
 }
 
 function Restart-Guard {
@@ -198,12 +214,38 @@ function Get-LockedProfiles {
     @($state.locked | ForEach-Object { [string] $_.profile })
 }
 
+$script:sensorNotes = @()
+$script:sensorMissed = 0
+$script:sensorTries = 0
+
 function Connect-Client([string] $target) {
-    # Connects and stays alive, so that Sysmon records the connection. 'connected' or what the simulator said.
-    $result = Invoke-Client @('--connect', "${target}:$Port", '--hold', "$HoldSeconds")
-    $line = @($result.Output -split "`r?`n" | Where-Object { $_ -match 'Connected;|was stopped:' })
-    $said = if ($line.Count -gt 0) { $line[0].Trim() } else { "exit code $($result.ExitCode), no message" }
-    [pscustomobject]@{ Connected = ($result.Output -match 'Connected;'); Said = $said }
+    <#
+        Connects and stays alive, so that Sysmon has time to record the connection, and asks the
+        Sysmon log whether it did. Up to three tries: what Sysmon does not record, the guard
+        cannot judge, and that is noted apart from the checks of the guard.
+    #>
+    $said = ''
+    $connected = $false
+    $recorded = $false
+    $tries = 0
+    while ($tries -lt 3 -and -not $recorded) {
+        $tries++
+        $started = Get-Date
+        $result = Invoke-Client @('--connect', "${target}:$Port", '--hold', "$HoldSeconds")
+        $line = @($result.Output -split "`r?`n" | Where-Object { $_ -match 'Connected;|was stopped:' })
+        $said = if ($line.Count -gt 0) { $line[0].Trim() } else { "exit code $($result.ExitCode), no message" }
+        $connected = $result.Output -match 'Connected;'
+        if (-not $connected) { break }   # no connection, nothing to record
+
+        $clientPid = $result.ProcessId
+        $recorded = Wait-Until { @(Get-SensorConnections $started.AddSeconds(-2)) -contains $clientPid } 4
+        $script:sensorTries++
+        if (-not $recorded) { $script:sensorMissed++ }
+        $reload = Get-SensorReloadTime
+        $after = if ($null -ne $reload) { "$([int] ($started - $reload).TotalSeconds) s after Sysmon loaded its configuration" } else { 'time of the last configuration load unknown' }
+        $script:sensorNotes += "    $($started.ToString('HH:mm:ss')) ${target}:$Port (pid $clientPid, $after): $(if ($recorded) { 'recorded' } else { 'NOT recorded by Sysmon' })"
+    }
+    [pscustomobject]@{ Connected = $connected; Said = $said; Recorded = $recorded; Tries = $tries }
 }
 
 function Get-SuggestedList([string] $text, [string] $name) {
@@ -259,6 +301,7 @@ try {
     $viaName = Connect-Client $HostName
     $viaAddress = Connect-Client $OtherAddress
     Add-Check '1' 'the client reaches the host name and the address' ($viaName.Connected -and $viaAddress.Connected) "$($viaName.Said) / $($viaAddress.Said)"
+    Add-Check '1' 'Sysmon recorded both connections (at most three tries each)' ($viaName.Recorded -and $viaAddress.Recorded) "name: $(if ($viaName.Recorded) { "try $($viaName.Tries)" } else { "not in $($viaName.Tries) tries" }); address: $(if ($viaAddress.Recorded) { "try $($viaAddress.Tries)" } else { "not in $($viaAddress.Tries) tries" })"
     $noted = @(Wait-NewLines $learningStart "R2 INFO $tag Learning mode: the game client connected to $([regex]::Escape($OtherAddress)):$Port" 10)
     $all = @(Get-NewLines $learningStart "R2 INFO $tag Learning mode: the game client connected to ")
     Add-Check '1' 'both connections are noted, not alerted (R2 info)' ($noted.Count -gt 0 -and $all.Count -ge 2) "$($all.Count) line(s)"
@@ -340,12 +383,13 @@ try {
     $viaName = Connect-Client $HostName
     $viaAddress = Connect-Client $OtherAddress
     $r2 = @(Get-NewLines $judgingStart "R2 \w+ $tag")
-    Add-Check '3' 'what was learned connects without a finding' ($viaName.Connected -and $viaAddress.Connected -and $r2.Count -eq 0) "$($viaName.Said) / $($viaAddress.Said); $($r2.Count) R2 line(s)"
+    # "No finding" only counts for a connection Sysmon recorded: one it missed is quiet for another reason.
+    Add-Check '3' 'what was learned connects, is recorded by Sysmon and leaves no finding' ($viaName.Recorded -and $viaAddress.Recorded -and $r2.Count -eq 0) "name: $(if ($viaName.Recorded) { 'recorded' } elseif ($viaName.Connected) { 'not recorded' } else { $viaName.Said }); address: $(if ($viaAddress.Recorded) { 'recorded' } elseif ($viaAddress.Connected) { 'not recorded' } else { $viaAddress.Said }); $($r2.Count) R2 line(s)"
 
     Write-Host "   The client connects to ${UnknownAddress}:$Port, which it never did while learning ..."
     $unknown = Connect-Client $UnknownAddress
     $r2 = @(Wait-NewLines $judgingStart "R2 CRITICAL $tag .*not on the allowlist: $([regex]::Escape($UnknownAddress)):$Port" 10)
-    Add-Check '3' 'an address that was not learned is an alert again' ($unknown.Connected -and $r2.Count -gt 0) "$($unknown.Said); $($r2.Count) R2 critical line(s)"
+    Add-Check '3' 'an address that was not learned is an alert again' ($unknown.Recorded -and $r2.Count -gt 0) "$(if ($unknown.Recorded) { "recorded at try $($unknown.Tries)" } elseif ($unknown.Connected) { "not recorded by Sysmon in $($unknown.Tries) tries" } else { $unknown.Said }); $($r2.Count) R2 critical line(s)"
 
     Write-Host '   The client opens the other program again ...'
     $null = Invoke-Client @('--open-process', 'read')
@@ -406,6 +450,11 @@ $report = @(
     "Verdict: $verdict"
     "Guard log: $guardLog"
 )
+if ($script:sensorTries -gt 0) {
+    $report += ''
+    $report += "Sensor: Sysmon recorded $($script:sensorTries - $script:sensorMissed) of $($script:sensorTries) connections of the test client (each client stayed alive for $HoldSeconds s):"
+    $report += $script:sensorNotes
+}
 if ($notes.Count -gt 0) {
     $report += ''
     $report += $notes

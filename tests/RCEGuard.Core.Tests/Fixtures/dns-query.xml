@@ -1,0 +1,29 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>22</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>22</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-15T19:06:50.2158513Z" />
+    <EventRecordID>847</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="28296" ThreadID="19604" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">dns</Data>
+    <Data Name="UtcTime">2026-11-15 19:06:48.819</Data>
+    <Data Name="ProcessGuid">{11111111-02c8-6afa-65ca-000000006f01}</Data>
+    <Data Name="ProcessId">23556</Data>
+    <Data Name="QueryName">one.one.one.one</Data>
+    <Data Name="QueryStatus">0</Data>
+    <Data Name="QueryResults">2606:4700:4700::1001;2606:4700:4700::1111;::ffff:1.1.1.1;::ffff:1.0.0.1;</Data>
+    <Data Name="Image">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="User">TESTPC\player</Data>
+  </EventData>
+</Event>

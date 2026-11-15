@@ -180,6 +180,22 @@ public class RecordedEventTests
         Assert.Empty(finding.KillTargets);
     }
 
+    [Theory]
+    [InlineData("r7-process-access-read", Severity.Medium, FindingAction.Log, "to read its memory (0x1010)")]
+    [InlineData("r7-process-access-write", Severity.High, FindingAction.Alert, "with rights to change it (0x102a")]
+    public void R7_another_program_opened_as_Sysmon_recorded_it(string fixture, Severity severity, FindingAction action, string summaryPart)
+    {
+        // Recorded on 2026-11-15 with the simulator's --open-process read / write.
+        var finding = Assert.Single(TestData.Engine().Evaluate(TestData.Fixture(fixture)));
+
+        Assert.Equal(("R7", severity, action), (finding.RuleId, finding.Severity, finding.Action));
+        Assert.Contains(summaryPart, finding.Summary);
+        Assert.Equal(@"C:\WINDOWS\Explorer.EXE", finding.Target);
+
+        var listed = TestData.Engine(TestData.Profile() with { AllowedProcessAccess = [@"C:\Windows\explorer.exe"] });
+        Assert.Equal(action == FindingAction.Alert ? 1 : 0, listed.Evaluate(TestData.Fixture(fixture)).Count);
+    }
+
     [Fact]
     public void Children_are_forgotten_when_the_client_exits()
     {

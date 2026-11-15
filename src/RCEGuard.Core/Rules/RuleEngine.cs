@@ -242,6 +242,9 @@ public sealed class RuleEngine
         }
 
         address = RemoteAllowlist.Normalize(address);
+        // Sysmon writes IPv6 addresses in full ("2606:4700:4700:0:0:0:0:1001"); with the port behind it nobody can
+        // tell where the address ends. Short form, and in brackets as in a URL.
+        target = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? $"[{address}]:{port}" : $"{address}:{port}";
         if (IPAddress.IsLoopback(address) || IsAllowed(profile, address))
         {
             return [];

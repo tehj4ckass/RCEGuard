@@ -23,4 +23,7 @@ all of these.
 | `r5-client-image-unsigned.xml` | any | the client image itself, unsigned; no finding |
 | `r5-system-dll-signed.xml` | any | signed system module; no finding |
 | `r7-process-access-own-child.xml` | `--spawn` | handle to the own child; no finding after R1 |
+| `r7-process-access-read.xml` | `--open-process read` | another program (the Explorer) opened with `0x1010`; R7 logged |
+| `r7-process-access-write.xml` | `--open-process write` | the same with `0x102a`; R7 alert |
+| `dns-query.xml` | `--connect one.one.one.one:443` | name query (event 22) with IPv6 and IPv4 answers; no finding, noted in learning mode |
 | `client-exit.xml` | any | client session ends |

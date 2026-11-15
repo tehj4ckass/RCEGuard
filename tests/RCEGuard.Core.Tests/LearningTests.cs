@@ -144,6 +144,31 @@ public class LearningTests
     }
 
     [Fact]
+    public void A_name_query_as_Sysmon_recorded_it_is_noted_and_leads_to_the_name_being_suggested()
+    {
+        // Recorded on 2026-11-15: the simulator connected to one.one.one.one and Windows chose the IPv6 address,
+        // which Sysmon writes in full in the connection event and in short form in the answer of the query.
+        var learned = Observe(Learning, TestData.Fixture("dns-query"), Connect("2606:4700:4700:0:0:0:0:1001", 443), Connect("9.9.9.9", 443));
+
+        Assert.Empty(new RuleEngine(Config(Learning)).Evaluate(TestData.Fixture("dns-query")));
+        var host = Assert.Single(learned.Hosts);
+        Assert.Equal("one.one.one.one", host.Name);
+        Assert.Equal(["2606:4700:4700::1001", "2606:4700:4700::1111", "1.1.1.1", "1.0.0.1"], host.Addresses);
+        var suggestion = LearnedReport.Suggest(learned, Learning);
+        Assert.Equal(["one.one.one.one"], suggestion.Hostnames);
+        Assert.Equal(["9.9.9.9"], suggestion.Addresses);
+    }
+
+    [Fact]
+    public void An_IPv6_address_is_reported_in_short_form_and_in_brackets()
+    {
+        var finding = Assert.Single(new RuleEngine(Config(Learning with { Learning = false })).Evaluate(Connect("2606:4700:4700:0:0:0:0:1001", 443)));
+
+        Assert.Equal("[2606:4700:4700::1001]:443", finding.Target);
+        Assert.EndsWith("not on the allowlist: [2606:4700:4700::1001]:443", finding.Summary);
+    }
+
+    [Fact]
     public void Files_outside_the_game_folder_are_noted_by_folder_and_extension()
     {
         var learned = Observe(

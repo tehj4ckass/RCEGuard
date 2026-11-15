@@ -1149,3 +1149,45 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
     Programm gleichen Namens (hier: der echte Client, während der Dienst den Testclient überwacht), meldet der
     Dienst beim Beenden fälschlich, der Client laufe noch. Es ist nur eine Warnung (und eine ntfy-Meldung, wenn
     eingerichtet); R8 geht aus demselben Grund nicht nach dem Namen.
+  - *Erster Lauf als Administrator (15.11.2026, 20:06 bis 20:08): 19 von 23 bestanden, „4 FAILED“.*
+    - *Bestanden am installierten Dienst:* Warnung „Learning mode is ON“; gestartetes Programm gemeldet und nicht
+      beendet („not terminated (learning mode)“), keine Sperre, keine Regel; R7 für `0x1010` MITTEL und für `0x102a`
+      HOCH; R3 HOCH; R8 nach 12 s mit 13,1 Kernen (die Startzeit aus dem Sysmon-Ereignis passt also zur
+      Prozessliste); `--learned` mit 7 Starts, dem Explorer als Vorschlag, der Programmdatei und 13,13 Kernen als
+      höchster Last. Nach dem Lernen: nicht gelernte Adresse ist R2 KRITISCH, Ansehen des gelisteten Explorers
+      still, Rechte zum Verändern weiter HOCH, gestartetes Programm samt Client beendet. Konfiguration zurück.
+    - *Durchgefallen, alle vier aus einem Grund:* Sysmon hat keine der beiden Verbindungen des Lernteils
+      aufgezeichnet (Client 20:06:48 zu `one.one.one.one`, Client 20:06:56 zu `9.9.9.9`; beide „Connected“, beide
+      8 s am Leben). Im Sysmon-Log des Laufs (`out\m5-events.xml`) gibt es für diese beiden Prozesse kein Ereignis 3.
+      Ohne Ereignis gab es nichts zu notieren und nichts vorzuschlagen, und im zweiten Teil war deshalb nichts
+      erlaubt. Der Dienst hat nichts verschluckt: Alles, was im Sysmon-Log steht, hat er gemeldet.
+    - *Was dieselbe Lücke nicht erklärt:* Die drei Verbindungen des zweiten Teils (20:08:00 bis 20:08:16, gleiche
+      Art Aufruf) hat Sysmon aufgezeichnet, jeweils 2 s nach der Verbindung. Sysmon hatte seine Konfiguration um
+      20:06:44 neu geladen (`install.ps1` am Anfang des Tests); die verpassten Verbindungen lagen 4 s und 12 s
+      danach, die aufgezeichneten 76 s und mehr. Vermutung, nicht belegt: Nach dem Laden der Konfiguration zeichnet
+      Sysmon eine Weile keine Verbindungen auf. Dagegen spricht eine Verbindung vom Nachmittag, die 3 s nach einem
+      Laden aufgezeichnet wurde (17:17:56). Fest steht nur: 8 s am Leben zu bleiben reicht nicht immer (die
+      Messung vom 12.11. hatte 4 von 4 ergeben).
+    - *Namensabfrage belegt:* Das Ereignis 22 des ersten Clients steht im Log
+      (`2606:4700:4700::1001;2606:4700:4700::1111;::ffff:1.1.1.1;::ffff:1.0.0.1;`), also so, wie der Lernmodus es
+      liest. Wiedergabe aller Ereignisse des Laufs durch den gebauten Dienst mit einem lernenden Profil: Name mit
+      vier Adressen notiert, die IPv6-Verbindung des zweiten Teils dem Namen zugeordnet, Vorschlag
+      `allowedHostnames: one.one.one.one`, `allowedRemote: 9.9.9.9, 8.8.8.8`, Explorer.
+    - *Daraus geändert:* (1) Das Skript fragt nach jeder Verbindung das Sysmon-Log, ob sie darin steht
+      (`Get-SensorConnections`), versucht es bis zu dreimal und führt jeden Versuch im Ergebnis unter „Sensor“ auf,
+      mit den Sekunden seit dem letzten Laden der Konfiguration. Eine eigene Prüfung sagt, ob Sysmon die
+      Verbindungen aufgezeichnet hat; „kein Befund“ zählt nur für eine aufgezeichnete Verbindung. Ein verpasster
+      Versuch ist kein Durchfaller, solange ein späterer aufgezeichnet wurde: Der Test gilt dem Wächter, die Lücke
+      des Sensors wird gezählt statt versteckt. (2) IPv6-Adressen in R2: Sysmon schreibt sie ausgeschrieben
+      (`2606:4700:4700:0:0:0:0:1001`), mit dem Port dahinter war das Ende der Adresse nicht zu erkennen; jetzt
+      Kurzform in eckigen Klammern (`[2606:4700:4700::1001]:443`). (3) Drei Ereignisse des Laufs sind anonymisiert
+      als Fixtures eingecheckt (Ereignis 22, Ereignis 10 für den Explorer mit Lese- und mit Schreibrechten), mit
+      Tests.
+    - *Geprüft nach der Änderung:* Trockenlauf in PowerShell 7 und 5.1 mit fünf Varianten, darunter „Sysmon verpasst
+      die ersten zwei Verbindungen“ (ALL PASSED, 5 von 7 aufgezeichnet, die zwei verpassten gelistet) und „Sysmon
+      zeichnet keine Verbindung auf“ (6 Prüfungen durchgefallen, 0 von 15). Die Abfragen des Sysmon-Logs selbst sind
+      nur in ihrer Form geprüft (dieselben Aufrufe gegen das Anwendungslog in beiden PowerShell-Versionen); das
+      Sysmon-Log braucht Admin-Rechte. Alle Suiten grün (268, 98, 29).
+    - *Bedeutung für den Betrieb, offen:* Der Lernmodus und R2 hängen daran, dass Sysmon Verbindungen aufzeichnet.
+      Der echte Client hält seine Verbindungen lange; ob Sysmon dessen Verbindungen zuverlässig schreibt, ist nicht
+      gemessen. Die Firewall-Regel (Abschnitt 15) hängt nicht an Sysmon.

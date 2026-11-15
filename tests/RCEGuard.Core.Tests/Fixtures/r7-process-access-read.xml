@@ -1,0 +1,33 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>10</EventID>
+    <Version>3</Version>
+    <Level>4</Level>
+    <Task>10</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2026-11-15T19:07:31.5667463Z" />
+    <EventRecordID>968</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="28296" ThreadID="12604" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>TESTPC</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">R7</Data>
+    <Data Name="UtcTime">2026-11-15 19:07:31.566</Data>
+    <Data Name="SourceProcessGUID">{11111111-02f3-6afa-7fca-000000006f01}</Data>
+    <Data Name="SourceProcessId">6720</Data>
+    <Data Name="SourceThreadId">29228</Data>
+    <Data Name="SourceImage">C:\RCEGuardTest\Wow.exe</Data>
+    <Data Name="TargetProcessGUID">{11111111-b2b0-6af9-e635-000000006f01}</Data>
+    <Data Name="TargetProcessId">2892</Data>
+    <Data Name="TargetImage">C:\WINDOWS\Explorer.EXE</Data>
+    <Data Name="GrantedAccess">0x1010</Data>
+    <Data Name="CallTrace">C:\WINDOWS\SYSTEM32\ntdll.dll+1668a4|C:\WINDOWS\System32\KERNELBASE.dll+1bf36|UNKNOWN(00007FFD03E84B4A)</Data>
+    <Data Name="SourceUser">TESTPC\player</Data>
+    <Data Name="TargetUser">TESTPC\player</Data>
+  </EventData>
+</Event>
