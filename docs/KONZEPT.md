@@ -883,6 +883,15 @@ der Tray-App. (4) Abnahme.
   - *Nicht geprüft:* die Installation als Administrator; ob der Start über den Explorer aus einer erhöhten Konsole
     wirklich ohne Admin-Rechte ankommt (prüft `install-test.ps1`, Schritt C); der Autostart bei der Anmeldung; das
     Entfernen bei einem zweiten angemeldeten Benutzer.
+  - *Lauf als Administrator (15.11.2026, 17:12): `install-test.ps1` ALL PASSED, 25 von 25.* Schritt C: Tray-App
+    installiert (Ordner, Run-Wert, Prozess), und der über den Explorer gestartete Prozess hat **keine**
+    Admin-Rechte, obwohl die Konsole erhöht lief. Schritt D: `uninstall.ps1` ohne Fehler, der Rechner wie vor dem
+    Test (kein Ordner, kein Run-Wert, kein Prozess, kein Stand im Benutzerprofil). Windows führt für 17:12:25 wieder
+    einen Absturzbericht für `Sysmon64.exe` 15.22; das Entfernen ging trotzdem durch, es ist nichts übrig. Kein
+    Absturzbericht für die Tray-App.
+  - *Weiter nicht geprüft:* der Autostart bei der Anmeldung; die Tray-App neben einem laufenden Dienst mit einem
+    echten Befund (Hinweis von Windows, Symbolwechsel, Freigabe mit Admin-Abfrage); ein zweiter angemeldeter
+    Benutzer.
   - *Nicht gebaut: Profilverwaltung.* Profile in der Tray-App zu bearbeiten hieße, die Konfiguration mit
     Admin-Rechten zu schreiben und den Dienst neu zu starten. Bis das entschieden ist, bleibt es beim Bearbeiten von
     `appsettings.json` als Administrator und einem Neustart des Dienstes. Entscheidung des Inhabers, ob und wie.
