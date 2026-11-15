@@ -1191,3 +1191,50 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
     - *Bedeutung für den Betrieb, offen:* Der Lernmodus und R2 hängen daran, dass Sysmon Verbindungen aufzeichnet.
       Der echte Client hält seine Verbindungen lange; ob Sysmon dessen Verbindungen zuverlässig schreibt, ist nicht
       gemessen. Die Firewall-Regel (Abschnitt 15) hängt nicht an Sysmon.
+  - *Zweiter Lauf als Administrator (15.11.2026, 20:22 bis 20:24), mit der Sensor-Prüfung: 23 von 24 bestanden.*
+    - *Der Lernmodus läuft am installierten Dienst von Anfang bis Ende:* beide Verbindungen notiert (R2 Info), kein
+      Alarm; `--learned` schlägt `allowedHostnames: one.one.one.one` und `allowedRemote: 9.9.9.9` vor (die
+      Namensabfrage des echten Sysmon wurde also gelesen und der Verbindung zugeordnet), dazu den Explorer; R8 mit
+      13,2 Kernen; nach dem Übernehmen des Vorschlags verbindet sich die gelernte Adresse ohne Befund, die nicht
+      gelernte ist R2 KRITISCH. Alles Übrige wie im ersten Lauf bestanden.
+    - *Durchgefallen ist eine Prüfung, wieder am Sensor:* Für den Hostnamen nach dem Lernen hat Sysmon in drei
+      Versuchen keine Verbindung aufgezeichnet. Ob der Wächter sie stillschweigend erlaubt hätte, lässt sich deshalb
+      für den Namen nicht sagen (für die Adresse ja).
+    - *Sensor: 4 von 9 Verbindungen aufgezeichnet.* Gegengeprüft am gespeicherten Sysmon-Log: Für die fünf anderen
+      Prozesse gibt es kein Ereignis 3, auch kein verspätetes; die Namensabfrage (Ereignis 22) steht bei allen drei
+      Versuchen mit dem Namen im Log. Die aufgezeichneten wurden 1,4 bis 2,4 s nach dem Start des Clients
+      geschrieben. Jeder Client lebte 8,1 s.
+    - *Die Vermutung vom ersten Lauf ist widerlegt:* Diesmal wurden gerade die beiden Verbindungen 4 s und 12 s nach
+      dem Laden der Konfiguration aufgezeichnet, und verpasst wurden welche 66 s bis 123 s danach. Am Laden der
+      Konfiguration liegt es also nicht.
+    - *Was beide Läufe zusammen sagen:* Von 14 Verbindungen eines Clients, der 8 s lebt, hat Sysmon 7 aufgezeichnet.
+      Die Messung vom 12.11. (4 von 4 bei 8 s) war zu klein. In allen Fällen schließt der Simulator die Verbindung
+      sofort nach dem Aufbau; lebendig bleibt nur der Prozess. Nicht gemessen ist, ob eine Verbindung, die offen
+      bleibt (wie die des Spiels zum Server), zuverlässig aufgezeichnet wird. Davon hängt ab, wie viel der
+      Lernmodus und R2 beim echten Client taugen. Nächster sinnvoller Schritt: genau das messen (Simulator hält die
+      Verbindung offen, im Lernmodus, damit keine Alarme kommen), bevor an der Regel etwas geändert wird.
+    - *Zustand danach nachgesehen:* Dienst und Sysmon laufen, keine Regel, keine Sperre, Konfiguration und Notizen
+      wie vor dem Test.
+
+## 18. Der RCE-Patcher für den Client (zu Abschnitt 12)
+
+Der Inhaber hat am 15.11.2026 nach `Gargash/WoW-RCE-Patcher` gefragt (ein Fork von `stoneharry/RCEPatcher`, den
+Abschnitt 12 als Ergänzung außerhalb des Projekts nennt). Nachgelesen am Quelltext, nicht ausgeführt:
+
+- *Was er tut:* Er kopiert `WoW.exe` nach `WoW_patched.exe` und setzt in der Kopie ein einziges Byte, an der festen
+  Dateiposition `0x2A7`, auf `0xC0`. Mehr nicht: kein Netzwerk, keine Registry, keine Prüfung von Version oder
+  Dateigröße, und er liest das Byte vorher nicht.
+- *Was das Byte ist (am Dateikopf des Clients des Inhabers nachgesehen, Build 12340, nur gelesen):* das oberste Byte
+  der Rechte des Abschnitts `.zdata`. Dort steht `0xE0` (lesen, schreiben, ausführen); `0xC0` heißt lesen und
+  schreiben, nicht ausführen. Der Client ist als DEP-fähig markiert, Windows setzt das also durch. Der Patcher
+  nimmt damit einem beschreibbaren Bereich des Clients das Recht, Code auszuführen; laut seiner Beschreibung
+  stürzt der Client ab, wenn ein Server den Exploit versucht. Wie der Exploit selbst geht, beschreiben beide
+  Projekte nicht, und hier steht es auch nicht.
+- *Verhältnis zu RCEGuard:* nicht dasselbe, sondern die andere Hälfte. Der Patcher verhindert einen bekannten Weg
+  am Client selbst, indem er die Client-Datei ändert. RCEGuard ändert den Client nie und beobachtet von außen, was
+  eingeschleuster Code täte, egal auf welchem Weg er hineinkommt. Beides zusammen ist sinnvoll.
+- *Vorbehalte:* Die Position ist fest. Bei einer anderen `WoW.exe` (anderer Build, vom Server angepasste Datei)
+  kann `0x2A7` etwas anderes sein; der Simulator dieses Projekts hat dort z. B. `0x00` in einem anderen Feld. Vor
+  dem Patchen also nachsehen, dass dort `0xE0` steht und es der Abschnitt `.zdata` ist. Ob ein Server eine
+  geänderte Client-Datei beanstandet, sagen die Projekte nicht; geprüft ist es nicht.
+- *Der Client des Inhabers ist nicht gepatcht* (dort steht `0xE0`).
