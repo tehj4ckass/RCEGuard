@@ -80,10 +80,11 @@ $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 $blockPath = [string] (Get-StateValue $state 'childProcessBlockPath' '')
 if ($blockPath) {
     $blockBefore = [string] (Get-StateValue $state 'childProcessBlockBefore' 'NOTSET')
+    $blockEntryBefore = [bool] (Get-StateValue $state 'childProcessBlockEntryBefore' $false)
     try {
         # Not again if an earlier run of this script, one that stopped later on, has done it already.
-        if ((Get-ChildProcessBlock $blockPath) -eq 'ON') {
-            Restore-ChildProcessBlock $blockPath $blockBefore
+        if ((Get-ChildProcessBlock $blockPath) -eq 'ON' -or (-not $blockEntryBefore -and (Test-ExploitProtectionEntry $blockPath))) {
+            Restore-ChildProcessBlock $blockPath $blockBefore $blockEntryBefore
             Write-Host "Exploit Protection: '$blockPath' may start other programs again (setting back to '$blockBefore')."
         }
     }

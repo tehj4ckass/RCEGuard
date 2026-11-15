@@ -657,7 +657,8 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     über ihren Namen entfernt; eine fremde Regel mit genau dem Namen `RCEGuard: <Profil>` außerhalb der Gruppe könnte
     dabei statt der eigenen getroffen werden. Eine Sperre, die nicht in die Datei geschrieben werden konnte, endet
     mit dem nächsten Abgleich.
-- **Schritt 3 (15.11.2026): Exploit Protection.** Noch nicht als Administrator gelaufen.
+- **Schritt 3 (15.11.2026): Exploit Protection.** Einschalten am echten System bestätigt, Zurücknehmen dort
+  gescheitert und danach umgebaut (siehe „Lauf als Administrator“ unten); der Umbau lief noch nicht als Administrator.
   - *Nur eine Einstellung:* „Do not allow child processes“ (`DisallowChildProcessCreation`) für den vollen Pfad des
     Clients, über `Set-ProcessMitigation`. Abschnitt 5 nennt den Programmnamen (`-Name Wow.exe`); der würde jede
     `Wow.exe` des Rechners treffen. Microsoft dokumentiert den vollen Pfad für genau diese Einstellung
@@ -698,3 +699,42 @@ entfernt die Regeln. (3) Exploit Protection (`DisallowChildProcessCreation`) in 
     nach einer Beschreibung des Mechanismus entsteht der im Kernel und fällt nicht unter die Sperre); wie die
     Abweisung beim Simulator ankommt; ob nach dem Zurücknehmen ein leerer Eintrag in der Registry bleibt
     (`prevention-test.ps1` schreibt den Registry-Stand vorher und nachher in die Ergebnisdatei); der echte Client.
+  - *Lauf als Administrator (15.11.2026, 00:35): Firewall-Teil erneut 20 von 20, Exploit Protection 3 FAIL.*
+    - *Einschalten geht.* `Set-ProcessMitigation` nimmt den vollen Pfad an, `Get-ProcessMitigation` liest ihn (auch
+      ohne Admin-Rechte). Registry: `Image File Execution Options\Wow.exe` mit `UseFilter = 1`, darunter ein
+      Schlüssel `{GUID}` mit `FilterFullPath`, `MitigationOptions` (24 Bytes, Byte 12 = `0x10`),
+      `MitigationAuditOptions`, `EAFModules`. Den Schlüssel `Wow.exe` gab es vorher nicht.
+    - *Windows weist den Programmstart ab.* Ohne Admin-Rechte nachgeprüft, solange die Einstellung noch an war:
+      `Wow.exe --spawn` in einer vorhandenen Konsole endet mit „Die Prozesserstellung wurde blockiert“, Exit-Code 1;
+      `--connect` läuft. Kein R1-Befund, weil kein Prozess entsteht. Windows protokolliert beides als Ereignis 4
+      (`… wurde daran gehindert, den untergeordneten Prozess C:\WINDOWS\SYSTEM32\cmd.exe … zu erstellen`); die
+      Einträge standen nicht in den ersten Sekunden im Log, später schon.
+    - *Ein Konsolenprogramm bekommt keine eigene Konsole mehr.* Windows weist auch `conhost.exe` ab (Ereignis 4);
+      der versteckt gestartete Simulator endete mit Exit-Code `0xC0000142`, ohne etwas auszugeben. Die Annahme aus
+      der Recherche, der Konsolen-Host entstehe im Kernel und falle nicht unter die Sperre, war falsch. In einer
+      schon offenen Konsole läuft das Programm. Der echte Client ist ein Fensterprogramm; der Simulator nicht, also
+      startet `prevention-test.ps1` ihn in diesem Teil in der Konsole des Tests (`Invoke-ClientHere`). Offen: den
+      Simulator als Fensterprogramm bauen; das entspräche dem echten Client und nähme die `conhost`-Zeilen aus M2.
+    - *Zurücknehmen ist gescheitert.* `Set-ProcessMitigation -Name <Pfad> -Remove -Disable
+      DisallowChildProcessCreation`, der von Microsoft dokumentierte Weg zurück zum Systemstandard, lief ohne Fehler
+      und änderte nichts (Registry vorher und nachher gleich; Modul ProcessMitigations 1.0.12). Die Prüfung nach dem
+      Befehl hat das gemeldet, `install.ps1` hat die Statusdatei geschrieben und abgebrochen: Die Einstellung stand
+      weiter in der Statusdatei, der Rechner war also nicht in einem unbekannten Zustand. Der Testclient durfte
+      danach weiter keine Programme starten.
+    - *Umbau (`Restore-ChildProcessBlock`).* Erst die Wege von `Set-ProcessMitigation` (`-Remove -Disable`, dann
+      `-Disable`), nach jedem Schritt wird gelesen. Gab es für den Client vorher keinen Eintrag, gehört der Eintrag
+      allein RCEGuard und wird danach direkt aus der Registry genommen: der Unterschlüssel, dessen `FilterFullPath`
+      genau der Pfad ist, und der Schlüssel des Programmnamens, wenn sonst nichts darin steht (kein anderer Pfad,
+      kein Wert außer `UseFilter`). Gab es vorher einen Eintrag, bleibt er mit allem anderen stehen; lässt sich die
+      Einstellung dann nicht abschalten, scheitert der Schritt mit dem, was die Befehle sagten. Die Statusdatei merkt
+      sich dafür `childProcessBlockEntryBefore`; fehlt der Wert (Statusdatei des Stands von 00:35, den es nur auf dem
+      Testrechner gibt), gilt „kein Eintrag vorher“. Bewusst kein bloßes `-Remove` ohne `-Disable`: Was der Befehl
+      bei einem Pfad löscht, ist nach dem Befund oben nicht mehr vorhersagbar.
+    - *Geprüft (Stellvertreter, die sich wie die echten Befehle vom 15.11. verhalten und in einer Kopie des
+      Registry-Aufbaus unter `HKCU` arbeiten; PowerShell 7 und 5.1):* 16 Fälle der Logik, darunter „kein Befehl
+      wirkt“, zwei Clients gleichen Namens, fremde Werte am Schlüssel des Programmnamens, Eintrag mit anderen
+      Einstellungen; `install.ps1` in 8 Läufen, der letzte mit dem Zustand des Testrechners; `uninstall.ps1`;
+      `prevention-test.ps1` 27 von 27. Echt gelesen: Das Aufräumen fände auf dem Testrechner genau einen Eintrag
+      mit passendem Pfad und keinen weiteren Wert am Schlüssel `Wow.exe`.
+    - *Nicht geprüft:* das Löschen in der echten Registry (braucht Admin-Rechte); ob `-Disable` für einen Pfad
+      wirkt; der echte Client.

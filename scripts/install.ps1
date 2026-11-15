@@ -218,6 +218,7 @@ $blockWanted =
 $block = Update-ChildProcessBlock `
     ([string] (Get-StateValue $state 'childProcessBlockPath' '')) `
     ([string] (Get-StateValue $state 'childProcessBlockBefore' 'NOTSET')) `
+    ([bool] (Get-StateValue $state 'childProcessBlockEntryBefore' $false)) `
     ([IO.Path]::GetFullPath($ClientPath)) `
     $blockWanted
 
@@ -237,6 +238,8 @@ function Write-InstallState([bool] $serviceInstalled) {
         # The client RCEGuard turned "Do not allow child processes" on for ('' if none), and what the setting was before.
         childProcessBlockPath     = [string] $block.Path
         childProcessBlockBefore   = [string] $block.Before
+        # Whether Windows had an Exploit Protection entry for that client before; if not, the entry goes completely.
+        childProcessBlockEntryBefore = [bool] $block.EntryBefore
         serviceInstalled          = $serviceInstalled
         updatedUtc                = (Get-Date).ToUniversalTime().ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8

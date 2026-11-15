@@ -18,7 +18,7 @@ started under the name WowGuard.
 | :--- | :--- | :--- |
 | M1 | Sensor: Sysmon configuration, install and uninstall scripts, simulator | done; install (including the cleanup after a failed manifest registration), uninstall and all simulator scenarios verified with Sysmon 15.22. Not yet verified against the real Sysmon: the second install attempt after a failure in the same run, and the removal of the leftover `C:\Windows\Sysmon64.exe` on uninstall |
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. A service that cannot start is removed again: `scripts\install-test.ps1` showed that on 2026-11-13 for a service build with a missing file and for a configuration that is not valid JSON (service, folder and event sources gone, sensor still there, nothing restarted by Windows), and a normal installation worked right after. **The same run ended with a half-removed Sysmon:** the Sysmon service crashed while `sysmon -u` was uninstalling it. A second `sysmon -u` could not finish the job either: the service that was left is protected by Windows and can only be removed by itself. `uninstall.ps1` now checks on the machine whether Sysmon is gone, tries once more, and for this dead end has the switch `-RemoveStuckSysmonService`. That way out worked on the test machine on 2026-11-14 (switch, restart of Windows, `uninstall.ps1` again): nothing of RCEGuard and Sysmon was left. Right after that `install-test.ps1` passed completely (2026-11-14 00:24, 21 of 21 checks): both failed starts, the installation without a fault, and the removal, this time without a crash of Sysmon. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
-| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. `scripts\prevention-test.ps1` passed on the installed service on 2026-11-15 (20 of 20 checks): Windows Firewall took the rule, the allowed address connected and the other one did not, the lockdown blocked everything and was still there after a restart of the service, `--release` ended it, and no rule was left at the end. **Seen in that run:** a connection the firewall blocks leaves no finding, see "Blocking in advance". Not verified: `uninstall.ps1` with rules in place; the real client. **Exploit Protection is built but has not run as administrator yet:** `install.ps1 -BlockChildProcesses` turns on "Do not allow child processes" for the client, `-AllowChildProcesses` and `uninstall.ps1` take it back; so far tried only with stand-ins for the Windows cmdlets. Plan and decisions: `docs/KONZEPT.md` section 15 |
+| M3 | Prevention: firewall profiles, Exploit Protection, kill switch | started. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. `scripts\prevention-test.ps1` passed on the installed service on 2026-11-15 (20 of 20 checks): Windows Firewall took the rule, the allowed address connected and the other one did not, the lockdown blocked everything and was still there after a restart of the service, `--release` ended it, and no rule was left at the end. **Seen in that run:** a connection the firewall blocks leaves no finding, see "Blocking in advance". Not verified: `uninstall.ps1` with rules in place; the real client. **Exploit Protection is half verified:** `install.ps1 -BlockChildProcesses` turned on "Do not allow child processes" for the test client on 2026-11-15, and Windows then refused when the simulator started a program. In the same run **taking the setting back failed**: the documented `Set-ProcessMitigation -Remove -Disable` reported no error and changed nothing. `-AllowChildProcesses` and `uninstall.ps1` now read the result back and remove the entry from the registry themselves; that has only run against stand-ins. Plan and decisions: `docs/KONZEPT.md` section 15 |
 | M4 | Tray UI, toast, ntfy, heartbeat | open |
 | M5 | Learning mode, R7, R8 | open |
 
@@ -304,8 +304,9 @@ replaces the file.
 **`install.ps1 -BlockChildProcesses` (Exploit Protection).** Rule R1 terminates a program the
 client started about a second after it started. With this switch Windows itself refuses the
 start: `install.ps1` turns on the Exploit Protection setting "Do not allow child processes"
-(`DisallowChildProcessCreation`) for the full path of the client. **Not yet run as
-administrator** (see the status table).
+(`DisallowChildProcessCreation`) for the full path of the client. Turning it on was checked
+with the simulator on 2026-11-15: its attempt to start `cmd.exe` ended with "process creation
+was blocked". Taking it back has not yet worked on a real system (see the status table).
 
 ```powershell
 .\scripts\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -BlockChildProcesses
@@ -317,6 +318,11 @@ administrator** (see the status table).
   an open point; it has not been tried with a real client.
 - It applies from the next start of the client and is kept by Windows, also while the RCEGuard
   service is stopped.
+- **A console program cannot get a console of its own under this setting:** Windows also refuses
+  the console host (`conhost.exe`), and the program ends before it runs (exit code 0xC0000142).
+  In a console that is already open it runs. The game client is a window program and needs no
+  console host; the simulator is a console program, so `prevention-test.ps1` runs it in its own
+  console for this part.
 - Once on, it stays on when `install.ps1` is run again without the switch, and moves along when
   `-ClientPath` changes. `install.ps1 -ClientPath ... -AllowChildProcesses` takes it back;
   `uninstall.ps1` does so too. "Back" means the value from before: not set, or forced off if it
@@ -326,7 +332,14 @@ administrator** (see the status table).
   they would break Warden.
 - A refused start is not a finding of RCEGuard: no program was started, so Sysmon records
   nothing. Windows logs it itself (log `Microsoft-Windows-Security-Mitigations/KernelMode`,
-  event 4); RCEGuard does not read that log.
+  event 4, with the program that was refused and its command line; seen for the simulator).
+  RCEGuard does not read that log.
+- Taking the setting back: the documented command of Windows for it
+  (`Set-ProcessMitigation -Remove -Disable`) had no effect for an entry by full path. So the
+  scripts check after every step whether the setting is really off, and an entry that RCEGuard
+  created (Windows had none for the client before) is removed from the registry directly, under
+  `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options`. An entry
+  that was there before keeps everything else that is in it.
 - Run the acceptance test (below) without the setting: its scenarios expect the started program
   to be terminated, not refused.
 
@@ -409,9 +422,10 @@ allowed, the first still connects and the second does not; after the simulator s
 program, the client is terminated and locked down, and not even the allowed address connects,
 also after a restart of the service; after `--release` the allowed address connects again; at
 the end the configuration is back as it was and no rule is left. Then Exploit Protection: with
-`install.ps1 -BlockChildProcesses` the test client still starts and connects, Windows refuses
-when it starts a program, and after `-AllowChildProcesses` the program starts again and the
-guard terminates it. Only the test client is ever blocked. The addresses are `1.1.1.1` and `1.0.0.1` on port 443 (`-AllowedAddress`,
+`install.ps1 -BlockChildProcesses` the test client still runs and connects (in the console of
+the test), Windows refuses when it starts a program, and after `-AllowChildProcesses` the
+setting and its entry are gone, the program starts again and the guard terminates it. Only the
+test client is ever blocked. The addresses are `1.1.1.1` and `1.0.0.1` on port 443 (`-AllowedAddress`,
 `-OtherAddress`, `-Port`). The result goes to `out\m3-result.txt`. The service stays installed
 for the test client afterwards.
 

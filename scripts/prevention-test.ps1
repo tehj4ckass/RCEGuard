@@ -18,9 +18,11 @@
          address connects again,
       7. puts the configuration back as it was and checks that the rule is gone,
       8. turns on "Do not allow child processes" for the test client with
-         'install.ps1 -BlockChildProcesses' and checks that the client still starts and connects,
-         that Windows refuses when it starts a program, and that the setting is gone again after
-         'install.ps1 -AllowChildProcesses'.
+         'install.ps1 -BlockChildProcesses' and checks that the client still runs and connects,
+         that Windows refuses when it starts a program, and that the setting and its entry are
+         gone again after 'install.ps1 -AllowChildProcesses'. For this part the simulator runs in
+         the console of this script: as a console program it cannot get a console of its own while
+         the setting is on.
 
     Needs an administrator PowerShell and an internet connection. Publish the service first with
     '.\build.ps1 -Publish' and the simulator to the test folder (see README).
@@ -143,6 +145,22 @@ function Set-TestBlock([bool] $on) {
 
 function Get-TestBlock {
     Get-ChildProcessBlock $client
+}
+
+function Test-TestBlockEntry {
+    Test-ExploitProtectionEntry $client
+}
+
+function Invoke-ClientHere([string[]] $arguments) {
+    <#
+        Runs the simulator in the console of this script instead of a hidden console of its own.
+        Needed while "Do not allow child processes" is on: the simulator is a console program, and
+        Windows then also refuses the console host a new console needs (seen 2026-11-15: exit code
+        0xC0000142, nothing printed). In a console that is already there it runs.
+    #>
+    $ErrorActionPreference = 'Continue'   # 5.1 turns a line on stderr into an error under 'Stop'
+    $lines = @(& $client @arguments 2>&1 | ForEach-Object { "$_" })
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($lines -join "`n") }
 }
 
 function Get-RefusedStartEvents([datetime] $since) {
@@ -354,8 +372,8 @@ if (-not $stopped) {
         Write-Host ''
         Write-Host '7. Exploit Protection: the test client may not start other programs ...' -ForegroundColor Cyan
         $blockBefore = Get-TestBlock
-        if ($blockBefore -ne 'NOTSET') {
-            throw "Exploit Protection already has a setting for child processes of '$client' ($blockBefore). The test needs a client without one."
+        if ($blockBefore -ne 'NOTSET' -or (Test-TestBlockEntry)) {
+            throw "Exploit Protection already has an entry for '$client' (child processes: $blockBefore). The test needs a client without one; 'install.ps1 -ClientPath ... -AllowChildProcesses' takes back what RCEGuard set."
         }
         $blockChanged = $true
         Set-TestBlock $true
@@ -364,16 +382,23 @@ if (-not $stopped) {
         $notes += 'Registry while the setting is on:'
         $notes += @(Get-BlockRegistry | ForEach-Object { "    $_" })
 
-        # The simulator is a console program: Windows starts a console host for it. That must still work.
-        $try = Test-Connect $OtherAddress
-        Add-Check '7' 'the client still starts and connects' $try.Connected $try.Said
+        # The simulator is a console program. With a console of its own it cannot start under the
+        # setting, because Windows refuses the console host too; that is noted, not checked. The
+        # game client is a window program and needs no console host.
+        $since = (Get-Date).AddSeconds(-2)
+        $own = Invoke-Client @('--connect', "${OtherAddress}:$Port")
+        $notes += "Started with a console of its own while the setting is on: exit code $($own.ExitCode) (0x$('{0:X8}' -f ($own.ExitCode -band 0xFFFFFFFF))), $(if ($own.Output -match 'Connected;') { 'connected' } else { 'did not run' })"
+
+        $here = Invoke-ClientHere @('--connect', "${OtherAddress}:$Port")
+        $hereSaid = @($here.Output -split "`r?`n" | Where-Object { $_ -match 'Connected;|was stopped:' })
+        Add-Check '7' 'the client still runs and connects (in the console of this test)' ($here.Output -match 'Connected;') $(if ($hereSaid.Count -gt 0) { $hereSaid[0].Trim() } else { "exit code $($here.ExitCode), no message" })
 
         $offset = Get-FileLength $guardLog
-        $since = (Get-Date).AddSeconds(-2)
-        $spawn = Invoke-Client @('--spawn', '--hold', "$HoldSeconds")
+        $spawn = Invoke-ClientHere @('--spawn', '--hold', "$HoldSeconds")
         $refusal = @($spawn.Output -split "`r?`n" | Where-Object { $_ -match 'was stopped:' })
-        $said = if ($refusal.Count -gt 0) { $refusal[0].Trim() } else { "exit code $($spawn.ExitCode): the program was started" }
-        if ($said.Length -gt 100) { $said = $said.Substring(0, 100) + '...' }
+        $said = if ($refusal.Count -gt 0) { $refusal[0].Trim() } else { "exit code $($spawn.ExitCode), no refusal reported" }
+        # The reason is at the end of the line.
+        if ($said.Length -gt 110) { $said = '...' + $said.Substring($said.Length - 110) }
         Add-Check '7' 'Windows refuses when the client starts a program' ($refusal.Count -gt 0) $said
         Start-Sleep -Seconds 3
         $r1 = @((Read-TextFrom $guardLog $offset) -split "`r?`n" | Where-Object { $_ -match '\bR1 CRITICAL \[' })
@@ -392,6 +417,8 @@ if (-not $stopped) {
             try { Set-TestBlock $false } catch { $backProblem = [string] $_.Exception.Message }
             $blockNow = Get-TestBlock
             Add-Check '7' 'install.ps1 -AllowChildProcesses puts the setting back' (-not $backProblem -and $blockNow -eq 'NOTSET') $(if ($backProblem) { $backProblem } else { "DisallowChildProcessCreation: $blockNow" })
+            $entryLeft = Test-TestBlockEntry
+            Add-Check '7' 'no Exploit Protection entry for the client is left' (-not $entryLeft) $(if ($entryLeft) { 'an entry is still there' } else { '' })
             $notes += 'Registry after the setting was taken back:'
             $notes += @(Get-BlockRegistry | ForEach-Object { "    $_" })
             if (-not $backProblem) {
