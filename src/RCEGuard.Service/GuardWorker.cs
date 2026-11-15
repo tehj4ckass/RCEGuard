@@ -56,9 +56,19 @@ public sealed class GuardWorker : BackgroundService
     private readonly Stopwatch sinceLearnedSave = Stopwatch.StartNew();
     private readonly HashSet<string> learningProfiles = new(StringComparer.OrdinalIgnoreCase);
 
+    // R8: the clients that are running, by pid, as the Sysmon log told (start and end of a client).
+    private readonly Dictionary<int, WatchedClient> clients = [];
+    private CpuWatch? cpuWatch;
+    private TimeSpan cpuPollInterval;
+    private DateTimeOffset nextCpuPoll;
+    private bool cpuReadFailed;
+
     /// <summary>Opens the notifier for an ntfy topic. Tests put one here that sends nothing over the network.</summary>
     internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
         (config, log) => new NtfyNotifier(config, log);
+
+    /// <summary>Reads the processor times of the running processes. Tests put made-up ones here.</summary>
+    internal Func<IReadOnlyDictionary<int, ProcessTime>> ReadProcessTimes { get; init; } = ProcessTimes.Take;
 
     /// <summary>Opens Windows Firewall. Tests put a stand-in here; the real one cannot be changed without administrator rights.</summary>
     internal Func<IFirewall> OpenFirewall { get; init; } = () => new WindowsFirewall();
@@ -159,6 +169,18 @@ public sealed class GuardWorker : BackgroundService
         }
 
         StartLearning(config);
+        if (config.CpuAlertCores > 0 && options.ReplayPath is null)
+        {
+            cpuWatch = new CpuWatch(config.CpuAlertCores, TimeSpan.FromSeconds(config.CpuAlertSeconds));
+            cpuPollInterval = TimeSpan.FromSeconds(Math.Clamp(config.CpuAlertSeconds / 5.0, 1, 15));
+            logger.LogInformation(
+                "R8: a client that keeps more than {Cores} processor cores busy on average over {Seconds} s is reported (this machine has {Count})",
+                config.CpuAlertCores.ToString("0.0#", System.Globalization.CultureInfo.InvariantCulture), config.CpuAlertSeconds, Environment.ProcessorCount);
+            if (config.CpuAlertCores >= Environment.ProcessorCount)
+            {
+                logger.LogWarning("R8 can never report on this machine: cpuAlertCores is not below its {Count} processor cores", Environment.ProcessorCount);
+            }
+        }
 
         if (options.ReplayPath is not null)
         {
@@ -234,8 +256,12 @@ public sealed class GuardWorker : BackgroundService
                     firewallGuard.Apply(hosts.ByProfile);
                 }
 
+                PollCpu(killer, store);
+
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                wait.CancelAfter(unsaved is null ? idleWait : PositionSaveInterval);
+                var waitFor = unsaved is null ? idleWait : PositionSaveInterval;
+                // While a client runs, the loop must come round often enough to measure it.
+                wait.CancelAfter(cpuWatch is not null && clients.Count > 0 && cpuPollInterval < waitFor ? cpuPollInterval : waitFor);
                 LogEntry entry;
                 try
                 {
@@ -456,75 +482,166 @@ public sealed class GuardWorker : BackgroundService
             learnedUnsaved = true;
         }
 
+        TrackClient(sysmonEvent!);
         foreach (var finding in findings)
         {
-            // The same alert again within the repeat window is counted on the stored finding, not reported anew.
-            var decision = debouncer.Check(finding);
-            if (!decision.Report)
+            if (Report(finding, killer, store, late))
             {
-                store.AddRepeat(decision.Entry!.Tag, finding.Time);
-                continue;
+                reported++;
             }
-
-            var taken = "none";
-            if (finding.Action == FindingAction.Kill && learningProfiles.Contains(finding.Profile))
-            {
-                // Still reported like any finding that terminates: the user must hear of it.
-                taken = "not terminated (learning mode)";
-            }
-            else if (finding.Action == FindingAction.Kill)
-            {
-                taken = killer is null
-                    ? "not acted on (replay)"
-                    // The time of the event lets the killer tell the process of the event from a later one with the same pid.
-                    : string.Join("; ", finding.KillTargets.Select(target => killer.Kill(target, finding.Time)));
-
-                // Kill switch: what made the client do this may still be there when it is started again.
-                if (killer is not null && finding.Profile.Length > 0 && firewallGuard is not null && hosts is not null)
-                {
-                    taken += lockOnKill switch
-                    {
-                        LockOnKill.On => "; " + firewallGuard.Lock(finding, hosts.ByProfile),
-                        LockOnKill.ReportOnly => "; would lock down the profile",
-                        _ => string.Empty,
-                    };
-                }
-            }
-
-            reported++;
-            var rowId = store.Add(finding, taken);
-            // Not for a replay: its events are old.
-            if (killer is not null && NotificationText.Notifies(finding))
-            {
-                notifier.Send(NotificationText.ForFinding(finding, taken, late, Environment.MachineName));
-            }
-            if (decision.Entry is { } entry)
-            {
-                entry.Tag = rowId;
-            }
-
-            var repeats = decision.RepeatsBefore > 0
-                ? $" | seen {decision.RepeatsBefore} more time(s) since the previous report"
-                : string.Empty;
-            if (late)
-            {
-                repeats += " | written while RCEGuard was not running";
-            }
-
-            var delayMs = (long)(DateTimeOffset.UtcNow - finding.Time).TotalMilliseconds;
-            var level = finding.Severity switch
-            {
-                Severity.Critical => LogLevel.Critical,
-                Severity.High => LogLevel.Warning,
-                _ => LogLevel.Information,
-            };
-            logger.Log(
-                level,
-                "{Rule} {Severity} [{Profile}] {Summary} | action: {Action} -> {Taken} | {Delay} ms after the event{Repeats}",
-                finding.RuleId, finding.Severity.ToString().ToUpperInvariant(), finding.Profile, finding.Summary, finding.Action, taken, delayMs, repeats);
         }
 
         return reported;
+    }
+
+    /// <summary>Notes the start and the end of a client, so that R8 knows which processes to measure.</summary>
+    private void TrackClient(SysmonEvent e)
+    {
+        if (cpuWatch is null || loadedConfig is null || e.EventId is not (SysmonEventIds.ProcessCreate or SysmonEventIds.ProcessTerminate))
+        {
+            return;
+        }
+
+        var image = e.Get("Image");
+        var profile = loadedConfig.Profiles.FirstOrDefault(candidate => PathRules.Same(candidate.ClientPath, image));
+        if (profile is null || e.GetInt("ProcessId") is not { } pid)
+        {
+            return;
+        }
+
+        if (e.EventId == SysmonEventIds.ProcessTerminate)
+        {
+            if (clients.Remove(pid, out var ended))
+            {
+                cpuWatch.Forget(ended.Key(pid));
+            }
+        }
+        else if (clients.Count < 256 || clients.ContainsKey(pid))
+        {
+            // An old event (read after a restart) may name a process that is long gone: the start
+            // time lets the measurement tell it from whatever has that pid now.
+            clients[pid] = new WatchedClient(profile.Name, image, RuleEngine.ProcessStart(e));
+        }
+    }
+
+    /// <summary>R8: measures the running clients if it is time to, and reports one whose load has risen above the threshold.</summary>
+    private void PollCpu(ProcessKiller killer, FindingStore store)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (cpuWatch is null || clients.Count == 0 || now < nextCpuPoll)
+        {
+            return;
+        }
+
+        nextCpuPoll = now + cpuPollInterval;
+        IReadOnlyDictionary<int, ProcessTime> times;
+        try
+        {
+            times = ReadProcessTimes();
+            cpuReadFailed = false;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or PlatformNotSupportedException or OutOfMemoryException)
+        {
+            if (!cpuReadFailed)
+            {
+                cpuReadFailed = true;
+                logger.LogWarning("R8 cannot measure the clients: {Reason}", ex.Message);
+            }
+
+            return;
+        }
+
+        foreach (var (pid, client) in clients.ToList())
+        {
+            // Gone, or the pid belongs to another process by now.
+            if (!times.TryGetValue(pid, out var time) || (time.Created - client.Started).Duration() > TimeSpan.FromSeconds(2))
+            {
+                clients.Remove(pid);
+                cpuWatch.Forget(client.Key(pid));
+                continue;
+            }
+
+            var verdict = cpuWatch.Sample(client.Key(pid), now, time.Cpu);
+            if (verdict.Cores is { } cores && learner is not null && learner.NoteCpu(client.Profile, cores))
+            {
+                learnedUnsaved = true;
+            }
+
+            if (verdict.Alert)
+            {
+                Report(cpuWatch.ToFinding(client.Profile, client.Image, pid, verdict.Cores!.Value, now), killer, store, late: false);
+            }
+        }
+    }
+
+    /// <summary>Acts on one finding and reports it, unless it only repeats a reported one.</summary>
+    /// <returns>True if the finding was reported.</returns>
+    private bool Report(Finding finding, ProcessKiller? killer, FindingStore store, bool late)
+    {
+        // The same alert again within the repeat window is counted on the stored finding, not reported anew.
+        var decision = debouncer.Check(finding);
+        if (!decision.Report)
+        {
+            store.AddRepeat(decision.Entry!.Tag, finding.Time);
+            return false;
+        }
+
+        var taken = "none";
+        if (finding.Action == FindingAction.Kill && learningProfiles.Contains(finding.Profile))
+        {
+            // Still reported like any finding that terminates: the user must hear of it.
+            taken = "not terminated (learning mode)";
+        }
+        else if (finding.Action == FindingAction.Kill)
+        {
+            taken = killer is null
+                ? "not acted on (replay)"
+                // The time of the event lets the killer tell the process of the event from a later one with the same pid.
+                : string.Join("; ", finding.KillTargets.Select(target => killer.Kill(target, finding.Time)));
+
+            // Kill switch: what made the client do this may still be there when it is started again.
+            if (killer is not null && finding.Profile.Length > 0 && firewallGuard is not null && hosts is not null)
+            {
+                taken += lockOnKill switch
+                {
+                    LockOnKill.On => "; " + firewallGuard.Lock(finding, hosts.ByProfile),
+                    LockOnKill.ReportOnly => "; would lock down the profile",
+                    _ => string.Empty,
+                };
+            }
+        }
+
+        var rowId = store.Add(finding, taken);
+        // Not for a replay: its events are old.
+        if (killer is not null && NotificationText.Notifies(finding))
+        {
+            notifier.Send(NotificationText.ForFinding(finding, taken, late, Environment.MachineName));
+        }
+        if (decision.Entry is { } entry)
+        {
+            entry.Tag = rowId;
+        }
+
+        var repeats = decision.RepeatsBefore > 0
+            ? $" | seen {decision.RepeatsBefore} more time(s) since the previous report"
+            : string.Empty;
+        if (late)
+        {
+            repeats += " | written while RCEGuard was not running";
+        }
+
+        var delayMs = (long)(DateTimeOffset.UtcNow - finding.Time).TotalMilliseconds;
+        var level = finding.Severity switch
+        {
+            Severity.Critical => LogLevel.Critical,
+            Severity.High => LogLevel.Warning,
+            _ => LogLevel.Information,
+        };
+        logger.Log(
+            level,
+            "{Rule} {Severity} [{Profile}] {Summary} | action: {Action} -> {Taken} | {Delay} ms after the event{Repeats}",
+            finding.RuleId, finding.Severity.ToString().ToUpperInvariant(), finding.Profile, finding.Summary, finding.Action, taken, delayMs, repeats);
+        return true;
     }
 
     /// <summary>
@@ -629,6 +746,16 @@ public sealed class GuardWorker : BackgroundService
         Microsoft.Data.Sqlite.SqliteException => $"the findings database in '{options.DataDirectory}' cannot be opened: {ex.Message}",
         _ => ex.ToString(),
     };
+}
+
+/// <summary>A running client that R8 measures.</summary>
+/// <param name="Profile">Name of its profile.</param>
+/// <param name="Image">Full path of the client.</param>
+/// <param name="Started">When the process was started, as the Sysmon event said.</param>
+internal sealed record WatchedClient(string Profile, string Image, DateTimeOffset Started)
+{
+    /// <summary>Identifies the process for the measurement: a pid alone can be reused.</summary>
+    public string Key(int processId) => $"{processId}@{Started.UtcTicks}";
 }
 
 /// <summary>What a finding that terminates the client does to its profile.</summary>

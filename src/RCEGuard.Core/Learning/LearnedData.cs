@@ -27,6 +27,12 @@ public sealed class LearnedProfile
     /// <summary>Other programs the client opened (not the ones it started itself).</summary>
     public List<LearnedProgram> Programs { get; set; } = [];
 
+    /// <summary>
+    /// The highest processor load of the client: busy cores on average over the time R8 looks at
+    /// (1.0 = one core fully busy). 0 if no whole such stretch was measured.
+    /// </summary>
+    public double PeakCpuCores { get; set; }
+
     /// <summary>True if one of the lists was full and something was left out.</summary>
     public bool Truncated { get; set; }
 }

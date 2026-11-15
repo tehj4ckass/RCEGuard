@@ -178,7 +178,7 @@ public sealed class RuleEngine
     }
 
     /// <summary>Creation time of the process a ProcessCreate event is about (field UtcTime, else the event time).</summary>
-    private static DateTimeOffset ProcessStart(SysmonEvent e) =>
+    public static DateTimeOffset ProcessStart(SysmonEvent e) =>
         DateTimeOffset.TryParseExact(
             e.Get("UtcTime"),
             "yyyy-MM-dd HH:mm:ss.fff",

@@ -28,6 +28,15 @@ public sealed record GuardConfig
     /// </summary>
     public bool Lockdown { get; init; }
 
+    /// <summary>
+    /// R8: a client that keeps more than this many processor cores busy on average over
+    /// <see cref="CpuAlertSeconds"/> is reported (1.0 = one core fully busy). 0 turns the rule off.
+    /// </summary>
+    public double CpuAlertCores { get; init; } = 2.0;
+
+    /// <summary>The time in seconds the average for <see cref="CpuAlertCores"/> is taken over.</summary>
+    public int CpuAlertSeconds { get; init; } = 300;
+
     /// <summary>Where findings are reported besides the log and the database. Null: nowhere else.</summary>
     public NotifyConfig? Notify { get; init; }
 }
@@ -153,6 +162,16 @@ public static class GuardConfigJson
         if (config.RepeatWindowSeconds is < 0 or > 86400)
         {
             throw new FormatException($"repeatWindowSeconds must be between 0 and 86400, got {config.RepeatWindowSeconds}.");
+        }
+
+        if (double.IsNaN(config.CpuAlertCores) || config.CpuAlertCores is < 0 or > 1024)
+        {
+            throw new FormatException($"cpuAlertCores must be between 0 (off) and 1024, got {config.CpuAlertCores.ToString(System.Globalization.CultureInfo.InvariantCulture)}.");
+        }
+
+        if (config.CpuAlertSeconds is < 5 or > 86400)
+        {
+            throw new FormatException($"cpuAlertSeconds must be between 5 and 86400, got {config.CpuAlertSeconds}.");
         }
 
         if (config.Notify?.Ntfy is { Enabled: true } ntfy)

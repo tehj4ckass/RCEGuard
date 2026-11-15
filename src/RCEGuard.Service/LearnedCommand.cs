@@ -52,7 +52,7 @@ internal static class LearnedCommand
             }
             else
             {
-                output.Write(LearnedReport.Render(notes, profile));
+                output.Write(LearnedReport.Render(notes, profile, config.CpuAlertCores));
                 shown++;
             }
 

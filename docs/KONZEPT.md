@@ -987,7 +987,7 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
 2. **R7 bewerten:** Zugriffsrechte einordnen (nur lesen gegen schreiben/Threads), bekannte Ziele aus dem Gelernten
    zulassen, unbekannte mit Schreibrechten melden. Dazu ein Simulator-Szenario, das ein anderes Programm nur öffnet.
    Gebaut, siehe unten.
-3. **R8:** CPU-Last des Clients im Dienst abfragen, Szenario `--cpu` gibt es schon.
+3. **R8:** CPU-Last des Clients im Dienst abfragen, Szenario `--cpu` gibt es schon. Gebaut, siehe unten.
 4. **Vorschlag in der Tray-App** und Anzeige, dass ein Profil lernt. Hängt an der offenen Entscheidung zur
    Profilverwaltung (Abschnitt 16).
 5. **Abnahme am installierten Dienst** mit dem Simulator; danach die Sitzung mit dem echten Client (Abschnitt 11).
@@ -1072,3 +1072,36 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
   - *Nicht geprüft:* die neue Einordnung am installierten Dienst (dort läuft noch der alte Stand: alle drei als
     MITTEL); ein aufgezeichnetes Ereignis 10 für ein fremdes Programm als Fixture (das Sysmon-Log braucht
     Admin-Rechte; kommt mit der Abnahme); der echte Client.
+- **Schritt 3 (15.11.2026): R8, Prozessorlast.** Nicht am installierten Dienst gelaufen.
+  - *Entscheidung des Inhabers (15.11.2026): nur die CPU-Last, ohne die Vordergrund-Bedingung aus Abschnitt 4.* Der
+    Dienst läuft in Sitzung 0 und sieht nicht, welches Fenster im Vordergrund ist. Die Tray-App könnte es melden,
+    läuft aber mit den Rechten des Benutzers; Schadcode mit denselben Rechten könnte die Meldung fälschen.
+  - *Regel (`CpuWatch`, Kern):* Durchschnitt der belegten Kerne über ein Fenster (`cpuAlertSeconds`, Standard 300)
+    größer als `cpuAlertCores` (Standard 2,0; 0 schaltet die Regel ab) → R8, MITTEL, Alarm, kein Beenden. Gemeldet
+    wird einmal je Strecke hoher Last; erst wenn der Durchschnitt wieder auf oder unter dem Wert war, kann der
+    nächste Alarm kommen. Vor dem ersten vollen Fenster wird nichts gesagt. Beide Werte gelten für alle Profile:
+    Sie hängen am Rechner und am Client-Typ, nicht am Server.
+  - *Der Standard von 2,0 Kernen ist eine Annahme:* Der 3.3.5a-Client rechnet im Wesentlichen auf einem Kern.
+    Gemessen ist das nicht. Der Lernmodus notiert deshalb die höchste Last (`peakCpuCores` in `learned.json`), und
+    `--learned` zeigt sie neben dem Schwellwert.
+  - *Messen, ohne den Client zu öffnen (`ProcessTimes`, Dienst):* Prozessorzeit und Startzeit aller Prozesse aus der
+    Prozessliste von Windows (`NtQuerySystemInformation`, Klasse 5; die Zahlen des Task-Managers). Der Dienst holt
+    sich dafür kein Handle auf den Client. `Process.TotalProcessorTime` von .NET hätte den Client alle 15 s
+    geöffnet; bisher öffnet der Dienst einen Prozess nur, um ihn zu beenden, und dabei bleibt es.
+  - *Welche Prozesse Clients sind,* weiß der Dienst aus dem Sysmon-Log: Start (Ereignis 1 mit dem Pfad des Clients)
+    und Ende (Ereignis 5). Die Prozessliste nennt nur den Dateinamen, nicht den Pfad; nach dem Namen zu gehen hieße,
+    auch ein anderes Programm namens `Wow.exe` zu messen. Gegen wiederverwendete PIDs: Die Startzeit aus der
+    Prozessliste muss zur Startzeit des Ereignisses passen (2 s Toleranz), sonst wird der Eintrag verworfen.
+  - *Lücke:* Ein Client, der schon lief, als der Dienst startete (Neustart des Dienstes mitten in einer Sitzung),
+    wird nicht gemessen, bis er neu gestartet wird: Sein Start-Ereignis liegt vor der gespeicherten Position im
+    Log. Schließen ließe sich das, indem der Dienst die laufenden Clients mit der Position zusammen speichert.
+  - *Takt:* alle 15 s (bei kürzerem Fenster ein Fünftel davon, mindestens 1 s); die Wächterschleife wacht dafür
+    entsprechend oft auf, solange ein Client läuft.
+  - *Geprüft:* 16 neue Tests im Kern (Fenster, einmal je Strecke, Durchschnitt statt Spitze, Zähler läuft zurück,
+    Einstellungen, höchste Last im Lernmodus) und 5 im Dienst: Wächterschleife mit ausgedachten Prozessorzeiten
+    (3,0 Kerne bei Schwelle 1,5 über 5 s: ein Alarm, kein zweiter, höchste Last notiert; 1,0 Kerne: kein Alarm;
+    fremder Prozess mit derselben PID und beendeter Client: nicht gemessen; `cpuAlertCores: 0`: aus) und die echte
+    Prozessliste dieses Rechners (eigener Prozess: Name, Startzeit auf 100 ms, Prozessorzeit wie .NET sie nennt).
+    Alle Suiten grün (264, 98, 29), die zeitabhängigen Tests viermal hintereinander.
+  - *Nicht geprüft:* R8 am installierten Dienst mit `--cpu` (ob Sysmon-Startzeit und Startzeit der Prozessliste
+    wirklich auf 2 s übereinstimmen, zeigt erst dieser Lauf); die Last des echten Clients.

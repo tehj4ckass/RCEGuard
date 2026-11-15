@@ -82,6 +82,28 @@ public sealed class Learner
         return noted || learned.Truncated != wasTruncated;
     }
 
+    /// <summary>Notes the processor load of a client. Returns true if it is the highest so far.</summary>
+    /// <param name="profileName">Name of the profile of the client.</param>
+    /// <param name="cores">Busy cores on average over the time R8 looks at.</param>
+    public bool NoteCpu(string profileName, double cores)
+    {
+        if (!learning.Any(profile => string.Equals(profile.Name, profileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var learned = For(profileName);
+        // Two decimals are plenty, and they keep the file from being rewritten for noise.
+        var rounded = Math.Round(cores, 2);
+        if (rounded <= learned.PeakCpuCores)
+        {
+            return false;
+        }
+
+        learned.PeakCpuCores = rounded;
+        return true;
+    }
+
     private LearnedProfile For(string name)
     {
         if (!byProfile.TryGetValue(name, out var learned))

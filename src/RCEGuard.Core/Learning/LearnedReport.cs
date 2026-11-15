@@ -73,7 +73,10 @@ public static class LearnedReport
         [.. learned.Hosts.Where(host => host.Addresses.Contains(address, StringComparer.OrdinalIgnoreCase)).Select(host => host.Name)];
 
     /// <summary>Text for a person: what was noted, and what to put into the configuration.</summary>
-    public static string Render(LearnedProfile learned, ClientProfile profile)
+    /// <param name="learned">What was noted.</param>
+    /// <param name="profile">The profile as it is configured now.</param>
+    /// <param name="cpuAlertCores">The load above which R8 reports (0: the rule is off), to compare the highest load with.</param>
+    public static string Render(LearnedProfile learned, ClientProfile profile, double cpuAlertCores = 0)
     {
         var text = new StringBuilder();
         var allowlist = new RemoteAllowlist(profile.AllowedRemote);
@@ -141,6 +144,11 @@ public static class LearnedReport
             var note = program.Access.Any(ChangesOrUnreadable) ? "  <- with rights to change it: reported even if listed" : string.Empty;
             text.AppendLine(CultureInfo.InvariantCulture, $"    {program.Image}  {program.Count}x  {string.Join(" ", program.Access)}{listed}{note}");
         }
+
+        text.AppendLine();
+        text.AppendLine(learned.PeakCpuCores > 0
+            ? string.Create(CultureInfo.InvariantCulture, $"  Highest processor load: {learned.PeakCpuCores:0.0#} cores on average{(cpuAlertCores > 0 ? string.Create(CultureInfo.InvariantCulture, $" (R8 reports above {cpuAlertCores:0.0#}: cpuAlertCores)") : " (R8 is off)")}")
+            : "  Highest processor load: not measured (the client did not run long enough while RCEGuard watched it)");
 
         var suggestion = Suggest(learned, profile);
         text.AppendLine();
