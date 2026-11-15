@@ -978,3 +978,62 @@ der Tray-App. (4) Abnahme.
   - *Weiter nicht geprüft:* der Autostart bei der Anmeldung; ein zweiter angemeldeter Benutzer; die Freigabe mit
     einem Konto ohne Admin-Rechte (dann fragt Windows nach Name und Kennwort eines Administrators statt nach Ja oder
     Nein); der echte Client.
+
+## 17. Entscheidungen bei der Umsetzung von M5
+
+M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
+
+1. **Lernmodus sammelt und schlägt vor** (Kern und Dienst, Befehl `--learned`). Gebaut, siehe unten.
+2. **R7 bewerten:** Zugriffsrechte einordnen (nur lesen gegen schreiben/Threads), bekannte Ziele aus dem Gelernten
+   zulassen, unbekannte mit Schreibrechten melden. Dazu ein Simulator-Szenario, das ein anderes Programm nur öffnet.
+3. **R8:** CPU-Last des Clients im Dienst abfragen, Szenario `--cpu` gibt es schon.
+4. **Vorschlag in der Tray-App** und Anzeige, dass ein Profil lernt. Hängt an der offenen Entscheidung zur
+   Profilverwaltung (Abschnitt 16).
+5. **Abnahme am installierten Dienst** mit dem Simulator; danach die Sitzung mit dem echten Client (Abschnitt 11).
+
+- **Schritt 1 (15.11.2026): Lernmodus sammelt und schlägt vor.** Nicht am installierten Dienst gelaufen.
+  - *Schalter:* `"learning": true` je Profil, Standard aus. Kein Zähler für Sitzungen und kein automatisches Ende:
+    Der Inhaber schaltet ihn aus. Der Dienst zählt die Starts des Clients nur mit und zeigt sie im Vorschlag.
+  - *Was im Lernmodus anders ist (nach Abschnitt 6: „Es wird nichts blockiert, nur gesammelt“):* Für den Client des
+    Profils wird nichts beendet und nichts gesperrt (`Handle`: Befund mit `Kill` bekommt als Aktion „not terminated
+    (learning mode)“, gemeldet wird er wie sonst, auch über ntfy). Die Firewall-Regel des Profils wird nicht
+    geschrieben (`FirewallPlanner.Plan`), weil eine blockierte Verbindung kein Ereignis hinterlässt (Abschnitt 15)
+    und so nichts zu lernen wäre. Eine Sperre von vorher bleibt, bis sie freigegeben wird. R2 für eine unbekannte
+    Adresse ist ein Logeintrag (Info) statt eines Alarms, `killOnUnknownRemote` gilt nicht. Alle anderen Regeln
+    melden wie immer. Der Dienst schreibt bei jedem Start eine Warnung ins Log.
+  - *Das heißt auch:* Im Lernmodus schützt RCEGuard diesen Client nicht. Wer in dieser Zeit angegriffen wird, bekommt
+    die Meldung, aber nichts wird beendet. Exploit Protection (`install.ps1 -BlockChildProcesses`) ist davon
+    unabhängig und bleibt wirksam.
+  - *Was gesammelt wird (`Learner`, Datei `learned.json` im Datenordner):* ausgehende Verbindungen (Adresse und
+    Port, Anzahl; auch die schon erlaubten), Namensabfragen (Ereignis 22: Name und die Adressen der Antwort),
+    Ordner außerhalb des Spielordners, in denen der Client Dateien anlegt (mit Endungen), und andere Programme, die
+    er öffnet (Ereignis 10 mit Zugriffsrechten; eigene Kinder nicht, das weiß die Regel-Engine). Je Liste höchstens
+    500 Einträge, danach wird nichts Neues aufgenommen und das Profil markiert. Gespeichert wird höchstens alle 5 s
+    und beim Beenden.
+  - *Vorschlag (`LearnedReport`, Befehl `RCEGuard.Service.exe --learned [Profil]`):* jede Adresse, die die Allowlist
+    nicht abdeckt. Hat der Client einen Namen abgefragt, dessen Antwort die Adresse enthielt, wird der Name
+    vorgeschlagen statt der Adresse. Ausgegeben werden `allowedHostnames` und `allowedRemote`, wie sie danach
+    aussähen. Der Befehl liest nur; übernommen wird von Hand in `appsettings.json`. Automatisch übernehmen würde
+    heißen: Was ein Angreifer im Lernmodus tut, steht danach auf der Allowlist.
+  - *Dateien und geöffnete Programme werden nur gezeigt.* Eine Allowlist für Dateipfade gibt es nicht: R3 für
+    gewöhnliche Dateien außerhalb des Spielordners ist ohnehin nur ein Logeintrag, es gäbe nichts abzuschalten. Für
+    geöffnete Programme kommt sie mit Schritt 2.
+  - *Geprüft:* 26 neue Tests im Kern (Regeln im Lernmodus, Sammeln, Grenzen, Vorschlag, Datei) und 12 im Dienst
+    (Wächterschleife mit Stellvertreter-Firewall: nichts beendet, nichts gesperrt, keine Regel, Notizen gespeichert
+    und nach Neustart fortgesetzt; Befehl `--learned`). Alle drei Suiten grün (224, 93, 29). Echt und ohne
+    Admin-Rechte: die 800 Ereignisse des M2-Abnahmelaufs (`out\m2-events.xml`) durch den gebauten Dienst
+    wiedergegeben, einmal ohne und einmal mit Lernmodus. Ohne: dieselben Befunde wie bisher (12 R1 kritisch, 20 R1
+    mittel, 4 R2 kritisch, 2 R3, 2 R4, 2 R9). Mit: dieselben, nur R2 als Info und alle `Kill` als „not terminated
+    (learning mode)“; `--learned` zeigt 19 Starts, `1.1.1.1:443` achtmal und schlägt `"allowedRemote":
+    ["1.1.1.1"]` vor.
+  - *Nicht geprüft:* der installierte Dienst im Lernmodus; ein Ereignis 22 des echten Sysmon (in den gespeicherten
+    Ereignissen ist keins; der Simulator hat bisher nur Adressen verbunden, das Format der Antwort ist aus der
+    Dokumentation von Sysmon); die Meldung über ntfy für einen nicht beendeten Befund; `learned.json` neben einer
+    lesenden Tray-App.
+  - *Bekannte Lücke:* Die Tray-App zeigt nicht, dass ein Profil lernt; ihr Symbol bleibt grün. Kommt mit Schritt 4.
+  - *Offene Entscheidungen des Inhabers:*
+    - Soll der Lernmodus wirklich auch das Beenden bei R1, R4, R6 und R9 aussetzen? So steht es in Abschnitt 6, und
+      so ist es gebaut. Die strengere Variante (nur R2 und die Firewall-Regel ausgesetzt, alles andere wie immer)
+      ist eine Zeile im Dienst. Für die erste Sitzung mit dem echten Client spricht einiges für die gebaute
+      Variante: Ein Fehlalarm bei R1 (z. B. ein Fehlerbericht-Programm des Clients) würde sonst das Spiel beenden.
+    - Soll der Lernmodus von selbst enden (z. B. nach zwei Sitzungen)? Nicht gebaut.

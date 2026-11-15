@@ -267,6 +267,27 @@ public sealed class RuleEngine
             ];
         }
 
+        if (profile.Learning)
+        {
+            // Learning mode: the allowlist is what is being worked out, so an unknown address is no alert yet.
+            return
+            [
+                new Finding
+                {
+                    RuleId = "R2",
+                    Severity = Severity.Info,
+                    Action = FindingAction.Log,
+                    Summary = $"Learning mode: the game client connected to {target} (not on the allowlist)",
+                    Profile = profile.Name,
+                    Image = image,
+                    ProcessId = e.GetInt("ProcessId"),
+                    Target = target,
+                    Time = e.TimeCreated,
+                    RecordId = e.RecordId,
+                },
+            ];
+        }
+
         return [NetworkFinding(e, profile, image, target, $"The game client connected to an address that is not on the allowlist: {target}")];
     }
 
@@ -277,7 +298,7 @@ public sealed class RuleEngine
     private static Finding NetworkFinding(SysmonEvent e, ClientProfile profile, string image, string target, string summary)
     {
         var pid = e.GetInt("ProcessId");
-        var kill = profile.KillOnUnknownRemote && pid is not null;
+        var kill = profile.KillOnUnknownRemote && !profile.Learning && pid is not null;
         return new Finding
         {
             RuleId = "R2",

@@ -40,7 +40,7 @@ public static class FirewallPlanner
     /// The rules that should exist, at most one per profile:
     /// a locked profile blocks every outbound connection of its client; a profile with
     /// <see cref="ClientProfile.Firewall"/> blocks every address that is neither on its allowlist
-    /// nor an address of one of its host names; any other profile has no rule.
+    /// nor an address of one of its host names, unless it is in learning mode; any other profile has no rule.
     /// A profile whose host names could not be resolved and that lists no addresses blocks
     /// everything but loopback: what is not known to be allowed is blocked.
     /// </summary>
@@ -63,8 +63,9 @@ public static class FirewallPlanner
                     FirewallRuleSpec.AnyAddress,
                     $"RCEGuard lockdown of profile '{profile.Name}': every outbound connection of this program is blocked until the lockdown is released."));
             }
-            else if (profile.Firewall)
+            else if (profile.Firewall && !profile.Learning)
             {
+                // Not while learning: a blocked connection leaves no event, so nothing could be learned about it.
                 var allowed = AllowedRanges(profile, resolvedHosts);
                 var blocked = AddressBlocks.Outside(allowed, AddressFamily.InterNetwork)
                     .Concat(AddressBlocks.Outside(allowed, AddressFamily.InterNetworkV6));

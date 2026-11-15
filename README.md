@@ -20,7 +20,7 @@ started under the name WowGuard.
 | M2 | Service and rule engine (R1–R6, R9), SQLite log | rule engine done and tested; service runs in a console. Acceptance test against Sysmon 15.22 passed on 2026-11-12: all simulator scenarios detected within 0.6–1.1 s of the log entry, the critical ones terminated. Installed as a Windows service (LocalSystem) the same test passed too, including the registration checks, the restart by Windows after the service process was ended, and terminating the program an exited child left behind. The build that saves its position in the Sysmon log passed the same test as installed service on 2026-11-12 21:59: all seven scenarios (0.1–1.1 s), among them `repeat` (three connections: one report, two counted), and all service checks, including the restart by Windows (after 62 s, from the third failure of a day on it takes that long) and the program started while the service was down (found 61 s later, right after the restart, child and client terminated). Two earlier runs of that day failed and were corrected: a first build received no event written after its start (wrong kind of subscription), and the test script counted old findings the service read at its start; see `docs/KONZEPT.md` section 14. After three reboots (2026-11-12 and 13, two of them for Windows updates, one cold start) the service started by itself 10–12 s after the kernel, continued in the Sysmon log where it had stopped, and then detected and terminated a simulator scenario within 0.8 s. Installing and removing again was checked on 2026-11-13 by comparing the machine before and after: after `uninstall.ps1` nothing of the installation was left (service, Program Files folder, data folder, Sysmon with its driver, event publisher and event log file, the note that the Sysinternals licence was accepted, the registrations of the service as a source of the Windows Application log). What stays are the entries the service wrote to the Application log. A service that cannot start is removed again: `scripts\install-test.ps1` showed that on 2026-11-13 for a service build with a missing file and for a configuration that is not valid JSON (service, folder and event sources gone, sensor still there, nothing restarted by Windows), and a normal installation worked right after. **The same run ended with a half-removed Sysmon:** the Sysmon service crashed while `sysmon -u` was uninstalling it. A second `sysmon -u` could not finish the job either: the service that was left is protected by Windows and can only be removed by itself. `uninstall.ps1` now checks on the machine whether Sysmon is gone, tries once more, and for this dead end has the switch `-RemoveStuckSysmonService`. That way out worked on the test machine on 2026-11-14 (switch, restart of Windows, `uninstall.ps1` again): nothing of RCEGuard and Sysmon was left. Right after that `install-test.ps1` passed completely (2026-11-14 00:24, 21 of 21 checks): both failed starts, the installation without a fault, and the removal, this time without a crash of Sysmon. **Not yet verified:** the service after the machine wakes from hibernation. **Known gap in the sensor:** Sysmon often does not record a connection of a client that ends within a few seconds, see "Running the guard". Toast moved to M4 |
 | M3 | Prevention: firewall profiles, Exploit Protection, kill switch | built and accepted with the simulator; **not tried with a real client**. Built: the service writes one block rule per profile to Windows Firewall (`"firewall": true`), locks a profile down after a finding that terminates its client (`"lockdown": true`) and ends a lockdown with `RCEGuard.Service.exe --release`; `uninstall.ps1` removes the rules. Both switches are off by default. `scripts\prevention-test.ps1` passed on the installed service on 2026-11-15 (20 of 20 checks): Windows Firewall took the rule, the allowed address connected and the other one did not, the lockdown blocked everything and was still there after a restart of the service, `--release` ended it, and no rule was left at the end. **Seen in that run:** a connection the firewall blocks leaves no finding, see "Blocking in advance". Not verified: `uninstall.ps1` with rules in place; the real client. Exploit Protection: `install.ps1 -BlockChildProcesses` turns on "Do not allow child processes" for the client, `-AllowChildProcesses` takes it back. Checked with the simulator on 2026-11-15 15:56 as part of `prevention-test.ps1` (27 of 27 checks): Windows refused when the simulator started a program, and after taking the setting back no entry was left and the guard terminated the started program again. A first run that day failed at taking it back (the documented `Set-ProcessMitigation -Remove -Disable` reported no error and changed nothing) and led to the scripts reading every change back and removing their own entry from the registry. `uninstall.ps1` takes the setting back too: `install-test.ps1` passed completely on 2026-11-15 15:58 (23 of 23 checks) with an installation that had it on; afterwards nothing of the installation was on the machine. Not verified: the real client with the setting. Plan and decisions: `docs/KONZEPT.md` section 15 |
 | M4 | Tray UI, toast, ntfy, heartbeat | started. Built: the service sends findings that alert or terminate to an ntfy topic, and reports about itself (cannot run, was ended unexpectedly, stopped while the client runs); `RCEGuard.Service.exe --notify-test` sends a test message. Tested with a stand-in for the network, and the published service sent a real test message to a listener on the test machine. **Not yet run:** the installed service with a real ntfy server. Also built: the tray application (`RCEGuard.Tray`): an icon in the notification area that shows whether the guard runs, a window with the findings, a pop-up for new findings, and "Release" for a lockdown, which asks Windows for an administrator. It only reads what the service stores. Tested without its user interface; the window and the icons were drawn into pictures and looked at, and the application was started once for a few seconds. `install.ps1` installs it to `C:\Program Files\RCEGuard Tray`, lets Windows start it for every user at sign-in and starts it; `uninstall.ps1` removes it. `install-test.ps1` confirmed that on 2026-11-15 17:12 (25 of 25 checks): installed, registered, running without administrator rights although it was started from an administrator console, and gone after the uninstall. Next to the installed service it showed the findings of `prevention-test.ps1` as Windows notifications (2026-11-15 17:17, seen by the owner). In that run the Snipping Tool could not be used while the notifications came; why is not known (the Windows logs show nothing that RCEGuard blocked), and since then the pop-ups are bundled. The release from the window was checked with `scripts\tray-test.ps1` on 2026-11-15 17:38 (9 of 9 checks; the owner clicked "Release ..." and confirmed the administrator question, the script checked): the lockdown ended, the release command had been started by the tray application, no firewall rule was left, the running service noticed 6 s later, and the test client started again. **Not yet done:** the start at sign-in; the real client. Plan and decisions: `docs/KONZEPT.md` section 16 |
-| M5 | Learning mode, R7, R8 | open |
+| M5 | Learning mode, R7, R8 | started. Built: learning mode for a profile (`"learning": true`): for that client nothing is terminated, locked down or blocked by the firewall rule of the profile, a connection to an address that is not on the allowlist is noted instead of alerted, and the service collects where the client connects to, which host names it asks for, where it creates files outside the game folder and which other programs it opens. `RCEGuard.Service.exe --learned` shows the notes and suggests what to add to the allowlist; nothing is taken over automatically. Tested with unit tests and by replaying the events of the M2 acceptance run through the built service. **Not yet run:** the installed service in learning mode; a name service event of the real Sysmon (the notes read it from the documented format); the real client. **Not built yet:** judging R7 with what was learned, R8, the suggestion in the tray application; the tray icon does not show that a profile is learning. Plan and decisions: `docs/KONZEPT.md` section 17 |
 
 Right now the guard evaluates events, terminates the client on critical findings and writes every
 finding to a database and a log file. It can be installed as a Windows service. It does not notify
@@ -146,12 +146,13 @@ Windows service is running: two guards would both act on every event):
 | `--replay <file>` | evaluate a saved events file instead of the live log, then exit; never terminates anything, needs no admin rights |
 | `--release [profile]` | end the lockdown of that profile (without a name: of every profile), then exit; see "Blocking in advance" |
 | `--notify-test` | send a test notification to the configured ntfy topic, then exit; needs no admin rights; see "Notifications" |
+| `--learned [profile]` | show what the learning mode noted for that profile (without a name: for every profile) and what it suggests for the allowlist, then exit; changes nothing, needs no admin rights; see "Learning mode" |
 
 Without `appsettings.json` the client the sensor was installed for is the only profile, with an
 empty allowlist: every connection of the client is then an R2 alert. A configuration looks like
 this (everything except `name` and `clientPath` is optional; the values shown for
-`killEnabled`, `repeatWindowSeconds`, `lockdown`, `killOnUnknownRemote` and `firewall` are the
-defaults). Profile names must be unique and must not contain `|`:
+`killEnabled`, `repeatWindowSeconds`, `lockdown`, `killOnUnknownRemote`, `firewall` and
+`learning` are the defaults). Profile names must be unique and must not contain `|`:
 
 ```json
 {
@@ -165,7 +166,8 @@ defaults). Profile names must be unique and must not contain `|`:
       "allowedRemote": ["203.0.113.0/24"],
       "allowedHostnames": ["logon.example.org"],
       "killOnUnknownRemote": false,
-      "firewall": false
+      "firewall": false,
+      "learning": false
     }
   ]
 }
@@ -178,6 +180,7 @@ What the rules do:
 | R1 | the client starts any program | critical | terminate child and client |
 | R1 | Windows attaches a console host (`conhost.exe`) to the client | medium | log |
 | R2 | connection to an address that is not allowed (loopback is always allowed) | critical | alert; terminate only with `killOnUnknownRemote` |
+| R2 | the same while the profile is in learning mode | info | log |
 | R3 | program file created anywhere, or any file in a Startup folder | high | alert |
 | R3 | other file outside the game folder | medium | log |
 | R4 | autostart, Winlogon, debugger hijack or service configuration written | critical | terminate client |
@@ -442,6 +445,44 @@ after `-AllowChildProcesses` nothing of the setting was left. Not tried with the
   that was there before keeps everything else that is in it.
 - Run the acceptance test (below) without the setting: its scenarios expect the started program
   to be terminated, not refused.
+
+### Learning mode
+
+For the first sessions with a client nobody knows its servers yet. `"learning": true` on a
+profile makes the service collect instead of judge. **While it is on, RCEGuard does not protect
+that client:**
+
+- Nothing is terminated and nothing is locked down for it. A finding that would terminate is
+  still reported the same way (log, findings, tray, ntfy), with `not terminated (learning mode)`
+  as the action taken.
+- The firewall rule of the profile (`"firewall": true`) is not written: a connection the
+  firewall blocks leaves no trace, so nothing could be learned about it. A lockdown from before
+  stays until it is released.
+- A connection to an address that is not on the allowlist is a log entry (R2, info) instead of
+  an alert. All other rules alert as always.
+
+The service says so with a warning in `guard.log` at every start. What it notes goes to
+`C:\ProgramData\RCEGuard\learned.json`: every address and port the client connected to, the
+host names it asked the name service for and their addresses, the folders outside the game
+folder in which it created files, and other programs it opened (not the ones it started). After
+a session or two:
+
+```powershell
+& 'C:\Program Files\RCEGuard\RCEGuard.Service.exe' --learned
+```
+
+shows the notes and, at the end, `allowedHostnames` and `allowedRemote` as they would be with
+everything added that is not covered yet. Where the client asked for a name that answered with
+the address, the name is suggested instead of the address. **Nothing is taken over
+automatically, and not everything in the notes is harmless:** whatever the client did while
+learning is in there, wanted or not. Put what you recognise into `appsettings.json`, set
+`"learning": false`, and restart the service. The notes stay in `learned.json` (and are
+continued if the profile learns again) until the file is deleted; `uninstall.ps1` removes it
+with the data folder.
+
+Files and opened programs are only shown; there is no allowlist for them yet. Each list takes at
+most 500 entries. A `--replay` with a learning profile adds to the notes of the data folder it
+is given.
 
 ### Acceptance test
 

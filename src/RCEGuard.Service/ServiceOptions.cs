@@ -29,6 +29,12 @@ public sealed record ServiceOptions
     /// <summary>Send a test notification instead of running the guard.</summary>
     public bool NotifyTest { get; init; }
 
+    /// <summary>Show what the learning mode noted instead of running the guard.</summary>
+    public bool Learned { get; init; }
+
+    /// <summary>The profile whose notes are shown; null means every profile.</summary>
+    public string? LearnedProfile { get; init; }
+
     /// <summary>
     /// The event log to read. Always the Sysmon log; only tests read another one, because the
     /// Sysmon log needs administrator rights. Not a command line option.
@@ -59,12 +65,16 @@ public sealed record ServiceOptions
                                then exit; run it in a console started as administrator
           --notify-test        send a test notification to the configured ntfy topic, then exit;
                                needs no admin rights
+          --learned [profile]  show what the learning mode noted for that profile (without a name:
+                               for every profile) and what it suggests for the allowlist, then
+                               exit; changes nothing and needs no admin rights
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
         It notes the last event it handled in <data-dir>\sysmon-position.json and, when started again,
         first reads what was written to the Sysmon log in the meantime.
-        Profiles in lockdown are noted in <data-dir>\lockdown.json.
+        Profiles in lockdown are noted in <data-dir>\lockdown.json, what profiles with
+        "learning": true did in <data-dir>\learned.json.
         """;
 
     /// <summary>Parses the arguments; returns null and an error text if they are not understood.</summary>
@@ -90,6 +100,14 @@ public sealed record ServiceOptions
                     break;
                 case "--notify-test":
                     options = options with { NotifyTest = true };
+                    break;
+                case "--learned":
+                    options = options with { Learned = true };
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        options = options with { LearnedProfile = args[++i] };
+                    }
+
                     break;
                 case "--release":
                     options = options with { Release = true };

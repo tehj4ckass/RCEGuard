@@ -4,6 +4,7 @@ using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using RCEGuard.Core.Configuration;
+using RCEGuard.Core.Learning;
 using RCEGuard.Core.Notifications;
 using RCEGuard.Core.Rules;
 using RCEGuard.Core.Sysmon;
@@ -33,6 +34,9 @@ public sealed class GuardWorker : BackgroundService
     /// <summary>How often a quiet guard looks whether the log holds events it was not given.</summary>
     private static readonly TimeSpan DeliveryCheckInterval = TimeSpan.FromSeconds(15);
 
+    /// <summary>What the learning mode noted is saved at most this often.</summary>
+    private static readonly TimeSpan LearnedSaveInterval = TimeSpan.FromSeconds(5);
+
     private readonly ServiceOptions options;
     private readonly ILogger<GuardWorker> logger;
     private readonly IHostApplicationLifetime lifetime;
@@ -45,6 +49,12 @@ public sealed class GuardWorker : BackgroundService
     private INotifier notifier = NullNotifier.Instance;
     private GuardConfig? loadedConfig;
     private string? runningMarker;
+    private Learner? learner;
+    private LearnedFile? learnedFile;
+    private bool learnedUnsaved;
+    private bool learnedSaveFailed;
+    private readonly Stopwatch sinceLearnedSave = Stopwatch.StartNew();
+    private readonly HashSet<string> learningProfiles = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Opens the notifier for an ntfy topic. Tests put one here that sends nothing over the network.</summary>
     internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
@@ -148,9 +158,12 @@ public sealed class GuardWorker : BackgroundService
                 "Lockdown after a finding that terminates the client is {State}", killEnabled ? "ON" : "OFF (nothing is terminated, so nothing is locked down)");
         }
 
+        StartLearning(config);
+
         if (options.ReplayPath is not null)
         {
             Replay(options.ReplayPath, engine, store);
+            SaveLearned(force: true);
             lifetime.StopApplication();
             return;
         }
@@ -232,6 +245,7 @@ public sealed class GuardWorker : BackgroundService
                 {
                     // Nothing came. Save the position and look whether that is right: is the log as quiet as the subscription?
                     SavePosition(positionFile, ref unsaved, sinceSave);
+                    SaveLearned(force: false);
                     if (sinceDeliveryCheck.Elapsed >= idleWait)
                     {
                         sinceDeliveryCheck.Restart();
@@ -249,6 +263,7 @@ public sealed class GuardWorker : BackgroundService
                 lastDelivered = entry.Position.RecordId;
                 var late = catchingUp && entry.Position.RecordId <= newestAtStart;
                 var findings = Handle(entry.Xml, engine, killer, store, late);
+                SaveLearned(force: false);
                 unsaved = entry.Position;
                 if (findings > 0 || sinceSave.Elapsed >= PositionSaveInterval)
                 {
@@ -272,6 +287,60 @@ public sealed class GuardWorker : BackgroundService
         finally
         {
             SavePosition(positionFile, ref unsaved, sinceSave);
+            SaveLearned(force: true);
+        }
+    }
+
+    /// <summary>Says which profiles are in learning mode and reads what was noted for them before.</summary>
+    private void StartLearning(GuardConfig config)
+    {
+        foreach (var profile in config.Profiles.Where(profile => profile.Learning))
+        {
+            learningProfiles.Add(profile.Name);
+            // A warning: for this client the guard only watches. Nobody should take that for protection.
+            logger.LogWarning(
+                "Learning mode is ON for '{Name}': nothing is terminated, locked down or blocked for this client{Firewall}; what it does is noted for a suggestion ('--learned'). Set \"learning\": false when done",
+                profile.Name,
+                profile.Firewall ? ", and the firewall rule of the profile is not written" : string.Empty);
+        }
+
+        if (learningProfiles.Count == 0)
+        {
+            return;
+        }
+
+        learnedFile = new LearnedFile(Path.Combine(options.DataDirectory, LearnedFile.FileName));
+        var known = learnedFile.Load(out var problem);
+        if (problem is not null)
+        {
+            logger.LogWarning("What the learning mode noted before ({Path}) cannot be read and is started anew: {Reason}", learnedFile.Path, problem);
+        }
+
+        learner = new Learner(config, known);
+    }
+
+    private void SaveLearned(bool force)
+    {
+        if (!learnedUnsaved || learner is null || learnedFile is null || (!force && sinceLearnedSave.Elapsed < LearnedSaveInterval))
+        {
+            return;
+        }
+
+        sinceLearnedSave.Restart();
+        try
+        {
+            learnedFile.Save(learner.Profiles);
+            learnedUnsaved = false;
+            learnedSaveFailed = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not fatal: the guard keeps watching. Tried again with the next event.
+            if (!learnedSaveFailed)
+            {
+                learnedSaveFailed = true;
+                logger.LogWarning("What the learning mode noted could not be saved to {Path}: {Reason}", learnedFile.Path, ex.Message);
+            }
         }
     }
 
@@ -381,7 +450,13 @@ public sealed class GuardWorker : BackgroundService
         }
 
         var reported = 0;
-        foreach (var finding in engine.Evaluate(sysmonEvent!))
+        var findings = engine.Evaluate(sysmonEvent!);
+        if (learner is not null && learner.Observe(sysmonEvent!, findings))
+        {
+            learnedUnsaved = true;
+        }
+
+        foreach (var finding in findings)
         {
             // The same alert again within the repeat window is counted on the stored finding, not reported anew.
             var decision = debouncer.Check(finding);
@@ -392,7 +467,12 @@ public sealed class GuardWorker : BackgroundService
             }
 
             var taken = "none";
-            if (finding.Action == FindingAction.Kill)
+            if (finding.Action == FindingAction.Kill && learningProfiles.Contains(finding.Profile))
+            {
+                // Still reported like any finding that terminates: the user must hear of it.
+                taken = "not terminated (learning mode)";
+            }
+            else if (finding.Action == FindingAction.Kill)
             {
                 taken = killer is null
                     ? "not acted on (replay)"

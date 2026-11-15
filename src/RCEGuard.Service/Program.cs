@@ -20,6 +20,11 @@ if (options.NotifyTest)
     return await NotifyTestCommand.RunAsync(options, Console.Out, Console.Error);
 }
 
+if (options.Learned)
+{
+    return LearnedCommand.Run(options, Console.Out, Console.Error);
+}
+
 if (options.Release)
 {
     return await ReleaseCommand.RunAsync(options, new WindowsFirewall(), Console.Out, Console.Error);

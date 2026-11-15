@@ -83,6 +83,15 @@ public sealed record ClientProfile
     /// </summary>
     public bool Firewall { get; init; }
 
+    /// <summary>
+    /// Learning mode: for this client nothing is terminated, locked down or blocked by the
+    /// firewall rule of the profile; connections to addresses that are not on the allowlist are
+    /// only noted. What the client does is collected for a suggestion (see
+    /// <see cref="RCEGuard.Core.Learning.LearnedReport"/>). Off by default; meant for the first sessions with a
+    /// client, and to be turned off again by hand.
+    /// </summary>
+    public bool Learning { get; init; }
+
     /// <summary>Folder of the client with a trailing backslash.</summary>
     public string GameDirectory
     {
