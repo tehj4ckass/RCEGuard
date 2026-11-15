@@ -1401,3 +1401,25 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
 - *Datenschutz:* Log, Notizen und Befunde einer echten Sitzung enthalten die Adressen der Server und Pfade mit dem
   Windows-Benutzernamen. Nichts davon kommt ins Repo (Regel in `CLAUDE.md`: keine echten Server-IPs); in die Doku
   gehen nur Anzahlen und Regelnamen.
+- *`install.ps1 -Learning` als Administrator und erster Start des echten Clients (15.11.2026, 22:26 bis 22:29).*
+  - *Installation:* ohne Fehler. Nachgesehen: Dienst und Sysmon laufen, Sensor, Dienst und `appsettings.json` nennen
+    denselben Client, Profil `Default` im Lernmodus, Warnung „Learning mode is ON“ im Log, Tray-App im neuen Stand
+    und ohne Admin-Rechte, keine Regel, keine Sperre, keine Exploit-Protection-Einstellung.
+  - *Die Sitzung war kurz:* Der Client lief von 22:27:13 bis etwa 22:29:38 (letztes Ereignis im Sysmon-Log), also
+    rund zweieinhalb Minuten: Start, Anmeldung, Realm. Für die Fragen aus der Vorbereitung reicht das nur zum Teil.
+  - *Fehlalarme beim Start:* keiner. 43 Befunde, alle nur geloggt: 36 R7 MITTEL, 4 R2 Info, 2 R3 MITTEL, 1 R4 Info.
+  - *R7:* Der Client hat in den ersten Sekunden 36 verschiedene laufende Programme geöffnet (Browser,
+    Chat-Programme, Systemprozesse, Konsolen), alle mit `0x10` (Speicher lesen), eines zusätzlich mit `0x1410`;
+    100 Zugriffe gezählt. Das ist das Muster, das Abschnitt 4 von Warden erwartet hat. Kein Zugriff mit Rechten
+    zum Verändern, also kein R7 HOCH: Die Sorge aus Schritt 2 („fordert er alle Rechte an?“) hat sich für den Start
+    nicht bestätigt. Ob er tatsächlich gelesen hat, sagt Sysmon nicht.
+  - *Verbindungen:* vier Ziele (zweimal Port 80, der Anmeldeport 3724, ein Realm-Port). Sysmon hat zwei davon
+    aufgezeichnet; die beiden auf Port 80 hat der Dienst nach rund 6 s in der Verbindungstabelle gefunden. Für drei
+    der vier Adressen gab es eine Namensabfrage, der Vorschlag nennt also Namen. Die zweite Quelle war beim echten
+    Client schon beim ersten Start nötig.
+  - *Dateien:* zwei Einträge im Internet-Cache des Benutzers (R3 MITTEL), passend zu den Abrufen über Port 80.
+  - *R4 Info:* ein Schreibzugriff unter `Services\Tcpip\Parameters`, wie beim Simulator.
+  - *Nicht gemessen:* die Prozessorlast (R8 braucht ein volles Fenster von 300 s; höchste Last in den Notizen: 0)
+    und alles, was erst im Spiel passiert: Kampf, Schlachtfeld, Raid, Realmwechsel, wiederholte Scans, Abmelden.
+    Das Akzeptanzkriterium aus Abschnitt 11 (zwei Stunden ohne Befund HOCH oder KRITISCH) ist damit offen.
+  - *Der Lernmodus bleibt an.* Eine längere Sitzung braucht keine neue Installation; die Notizen werden fortgesetzt.
