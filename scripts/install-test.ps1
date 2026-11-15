@@ -75,6 +75,7 @@ if (-not $UninstallScript) { $UninstallScript = Join-Path $PSScriptRoot 'uninsta
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
 . (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
+. (Join-Path $PSScriptRoot 'TrayTools.ps1')
 
 $servicesKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $sysmonServiceNames = @('Sysmon64', 'Sysmon', 'Sysmon64a')
@@ -104,7 +105,8 @@ function Get-InstallationTraces {
     <#
         Everything an RCEGuard installation puts on the machine, each with whether it is there now.
         Reads only (registry and file system), so it also works without administrator rights.
-        Group 'guard': the service. Group 'sensor': Sysmon. Group 'data': the data folder.
+        Group 'guard': the service. Group 'tray': the tray application. Group 'sensor': Sysmon.
+        Group 'data': the data folder.
     #>
     $windir = $env:windir
     $found = @(
@@ -116,6 +118,10 @@ function Get-InstallationTraces {
         $found += , @('guard', "event source '$source'", (Test-Path -LiteralPath (Join-Path $script:GuardEventLogRoot $source)))
     }
     $found += , @('guard', "firewall rules of the group '$script:GuardFirewallGroup'", (@(Get-GuardFirewallRules).Count -gt 0))
+    $found += , @('tray', "folder '$script:TrayInstallDir'", (Test-Path -LiteralPath $script:TrayInstallDir))
+    $found += , @('tray', 'start of the tray application at sign-in', ($null -ne (Get-TrayRunCommand)))
+    $found += , @('tray', 'process of the tray application', (@(Get-TrayProcesses).Count -gt 0))
+    $found += , @('tray', 'state of the tray application in a user profile', (@(Get-TrayStateFolders).Count -gt 0))
     $found += , @('data', "folder '$DataDir'", (Test-Path -LiteralPath $DataDir))
     $found += , @('sensor', 'Sysmon service', (@($sysmonServiceNames | Where-Object { Test-Path -LiteralPath (Join-Path $servicesKey $_) }).Count -gt 0))
     $found += , @('sensor', 'Sysmon driver', (Test-Path -LiteralPath (Join-Path $servicesKey 'SysmonDrv')))
@@ -135,6 +141,36 @@ function Get-InstallationTraces {
     }
 }
 
+function Test-ProcessElevated([int] $processId) {
+    <#
+        $true if the process runs with administrator rights (an elevated token), $false if not,
+        $null if that cannot be found out. Asks Windows about the token of the process; nothing
+        of the process itself is read.
+    #>
+    if (-not ('RceGuardTest.Token' -as [type])) {
+        Add-Type -Namespace RceGuardTest -Name Token -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+[DllImport("advapi32.dll", SetLastError = true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+[DllImport("advapi32.dll", SetLastError = true)] public static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+'@
+    }
+    $process = [RceGuardTest.Token]::OpenProcess(0x1000, $false, $processId)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if ($process -eq [IntPtr]::Zero) { return $null }
+    try {
+        $token = [IntPtr]::Zero
+        if (-not [RceGuardTest.Token]::OpenProcessToken($process, 0x8, [ref] $token)) { return $null }   # TOKEN_QUERY
+        try {
+            $elevated = 0
+            $returned = 0
+            if (-not [RceGuardTest.Token]::GetTokenInformation($token, 20, [ref] $elevated, 4, [ref] $returned)) { return $null }   # TokenElevation
+            return ($elevated -ne 0)
+        }
+        finally { $null = [RceGuardTest.Token]::CloseHandle($token) }
+    }
+    finally { $null = [RceGuardTest.Token]::CloseHandle($process) }
+}
+
 function Get-PresentNames([object[]] $traces, [string[]] $groups) {
     @($traces | Where-Object { $_.Present -and $_.Group -in $groups } | ForEach-Object { $_.Name })
 }
@@ -143,7 +179,7 @@ if ($ListOnly) {
     $traces = @(Get-InstallationTraces)
     $traces | Select-Object Group, Name, @{ Name = 'Present'; Expression = { if ($_.Present) { 'yes' } else { '-' } } } |
         Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-    $present = @(Get-PresentNames $traces @('guard', 'data', 'sensor'))
+    $present = @(Get-PresentNames $traces @('guard', 'tray', 'data', 'sensor'))
     if ($present.Count -eq 0) { Write-Host 'Nothing of an RCEGuard installation is on this machine.' }
     else { Write-Host "$($present.Count) of $($traces.Count) are present." }
     return
@@ -172,7 +208,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ServicePath $neededFile) -PathType 
 $before = @(Get-InstallationTraces)
 # The file of Sysmon's log and the licence note may be there from an earlier Sysmon of the owner:
 # they are not ours, must survive the test, and so are allowed to be there.
-$blocking = @(Get-PresentNames $before @('guard', 'data', 'sensor') | Where-Object { $_ -notin @('Sysmon event log file', 'Sysinternals licence note (this user)') })
+$blocking = @(Get-PresentNames $before @('guard', 'tray', 'data', 'sensor') | Where-Object { $_ -notin @('Sysmon event log file', 'Sysinternals licence note (this user)') })
 if ($blocking.Count -gt 0 -and -not $AllowNonAdmin) {
     throw "This test needs a machine without RCEGuard and without Sysmon, because it removes both at the end. Found: $($blocking -join '; '). Run uninstall.ps1 first."
 }
@@ -281,6 +317,16 @@ try {
     Add-Check 'C' 'the service starts with Windows' ($null -ne $service -and $service.StartMode -eq 'Auto') $(if ($null -ne $service) { $service.StartMode } else { '' })
     $blockNow = Get-ChildProcessBlock $client
     Add-Check 'C' 'Exploit Protection: the client may not start other programs' ($blockNow -eq 'ON') "DisallowChildProcessCreation: $blockNow"
+    # The tray application is started through Explorer; give it a moment to come up.
+    $trayDeadline = (Get-Date).AddSeconds(15)
+    while (@(Get-TrayProcesses).Count -eq 0 -and (Get-Date) -lt $trayDeadline) { Start-Sleep -Milliseconds 500 }
+    $trayNow = @(Get-PresentNames @(Get-InstallationTraces) @('tray'))
+    $trayRun = [string] (Get-TrayRunCommand)
+    Add-Check 'C' 'the tray application is installed, starts at sign-in and is running' ($trayNow.Count -ge 3 -and $trayRun -eq "`"$(Join-Path $script:TrayInstallDir $script:TrayExeName)`"") ($trayNow -join '; ')
+    # Started from this administrator console, but it must not have administrator rights itself.
+    $trayRights = @(Get-TrayProcesses | ForEach-Object { Test-ProcessElevated ([int] $_.ProcessId) })
+    $trayRightsText = @($trayRights | ForEach-Object { if ($null -eq $_) { 'unknown' } elseif ($_) { 'administrator rights' } else { 'no administrator rights' } }) -join ', '
+    Add-Check 'C' 'the tray application runs without administrator rights' ($trayRights.Count -ge 1 -and @($trayRights | Where-Object { $_ -ne $false }).Count -eq 0) $(if ($trayRights.Count) { $trayRightsText } else { 'not running' })
 
     # --- D. Remove everything ---------------------------------------------------------------------
     Write-Host ''
@@ -292,8 +338,8 @@ try {
     $blockNow = Get-ChildProcessBlock $client
     Add-Check 'D' 'Exploit Protection: the setting is back to what it was' ($blockNow -eq 'NOTSET') "DisallowChildProcessCreation: $blockNow"
     $after = @(Get-InstallationTraces)
-    $beforeNames = @(Get-PresentNames $before @('guard', 'data', 'sensor'))
-    $afterNames = @(Get-PresentNames $after @('guard', 'data', 'sensor'))
+    $beforeNames = @(Get-PresentNames $before @('guard', 'tray', 'data', 'sensor'))
+    $afterNames = @(Get-PresentNames $after @('guard', 'tray', 'data', 'sensor'))
     $added = @($afterNames | Where-Object { $_ -notin $beforeNames })
     $missing = @($beforeNames | Where-Object { $_ -notin $afterNames })
     Add-Check 'D' 'nothing of the installation is left' ($added.Count -eq 0) $(if ($added.Count) { $added -join '; ' } else { 'the machine looks as before the test' })
@@ -312,7 +358,7 @@ $verdict =
     if ($unexpected) { "STOPPED: $unexpected" }
     elseif ($failed -eq 0) { 'ALL PASSED' }
     else { "$failed FAILED" }
-$leftNow = @(Get-PresentNames @(Get-InstallationTraces) @('guard', 'data', 'sensor'))
+$leftNow = @(Get-PresentNames @(Get-InstallationTraces) @('guard', 'tray', 'data', 'sensor'))
 $report = @(
     "RCEGuard install test, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     "Client: $client    Service from: $ServicePath"

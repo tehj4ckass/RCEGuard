@@ -4,7 +4,9 @@
     Removes RCEGuard again: the guard service and the sensor.
 
 .DESCRIPTION
-    First stops and removes the Windows service 'RCEGuard', C:\Program Files\RCEGuard and the
+    First ends and removes the tray application (C:\Program Files\RCEGuard Tray, its start at
+    sign-in, the file in each user profile that notes which finding it announced last), then
+    stops and removes the Windows service 'RCEGuard', C:\Program Files\RCEGuard and the
     registrations of the service as a source of the Windows Application log.
     Then uses C:\ProgramData\RCEGuard\install-state.json written by install.ps1:
       - If install.ps1 -BlockChildProcesses turned on the Exploit Protection setting "Do not
@@ -56,8 +58,15 @@ function Add-UninstallLog([string[]] $lines) {
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
 . (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
+. (Join-Path $PSScriptRoot 'TrayTools.ps1')
 
-# The guard service goes first: it depends on Sysmon and keeps files in the data folder open.
+# The tray application first: it reads the data folder. Like the service it is removed even
+# without a state file.
+if (Uninstall-GuardTray) {
+    Write-Host "RCEGuard tray application removed ('$script:TrayInstallDir', its start at sign-in, its state in the user profiles)."
+}
+
+# Then the guard service: it depends on Sysmon and keeps files in the data folder open.
 # It is removed even without a state file, so a broken installation can always be cleaned up.
 $serviceRemoved = Uninstall-GuardService
 if ($serviceRemoved) {

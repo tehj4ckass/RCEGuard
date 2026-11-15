@@ -11,9 +11,10 @@
     Build configuration, Release by default.
 
 .PARAMETER Publish
-    Also publishes the service to artifacts\service, the folder scripts\install.ps1 installs from.
-    The publish is self-contained (brings its own .NET runtime): the service runs as LocalSystem
-    and must not depend on a runtime in a user profile.
+    Also publishes the service to artifacts\service and the tray application to artifacts\tray,
+    the folders scripts\install.ps1 installs from. Both are self-contained (bring their own .NET
+    runtime): the service runs as LocalSystem, the tray application as whoever signs in, and
+    neither may depend on a runtime in the profile of the user who built them.
 #>
 [CmdletBinding()]
 param(
@@ -51,4 +52,11 @@ if ($Publish) {
     & dotnet publish $serviceProject -c $Configuration -r win-x64 --self-contained true -o $serviceOut --nologo
     if ($LASTEXITCODE -ne 0) { throw "Publishing the service failed (exit code $LASTEXITCODE)." }
     Write-Host "Service published to '$serviceOut'."
+
+    $trayOut = Join-Path $PSScriptRoot 'artifacts\tray'
+    if (Test-Path -LiteralPath $trayOut) { Remove-Item -LiteralPath $trayOut -Recurse -Force }
+    $trayProject = Join-Path $PSScriptRoot 'src\RCEGuard.Tray\RCEGuard.Tray.csproj'
+    & dotnet publish $trayProject -c $Configuration -r win-x64 --self-contained true -o $trayOut --nologo
+    if ($LASTEXITCODE -ne 0) { throw "Publishing the tray application failed (exit code $LASTEXITCODE)." }
+    Write-Host "Tray application published to '$trayOut'."
 }

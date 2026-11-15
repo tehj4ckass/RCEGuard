@@ -13,6 +13,8 @@
       5. copies the published guard service to C:\Program Files\RCEGuard and registers it as the
          Windows service 'RCEGuard': LocalSystem, automatic start, depends on Sysmon, restarted by
          Windows after a failure. Publish the service first with '.\build.ps1 -Publish'.
+      6. copies the published tray application to C:\Program Files\RCEGuard Tray, lets Windows
+         start it for every user at sign-in, and starts it now.
 
     Running the script again points the sensor at another client and updates the service.
     -SkipService installs only the sensor.
@@ -38,6 +40,12 @@
 
 .PARAMETER SkipService
     Installs only the sensor. A guard service that is already installed is kept and restarted.
+
+.PARAMETER TrayPath
+    Folder with the published tray application; default is artifacts\tray of this repository.
+
+.PARAMETER SkipTray
+    Does not install the tray application. One that is already installed stays as it is.
 
 .PARAMETER BlockChildProcesses
     Turns on the Exploit Protection setting "Do not allow child processes" for the client: Windows
@@ -66,6 +74,8 @@ param(
     [switch] $ReplaceExistingConfig,
     [string] $ServicePath,
     [switch] $SkipService,
+    [string] $TrayPath,
+    [switch] $SkipTray,
     [switch] $BlockChildProcesses,
     [switch] $AllowChildProcesses
 )
@@ -81,6 +91,7 @@ $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
 . (Join-Path $PSScriptRoot 'GuardServiceTools.ps1')
 . (Join-Path $PSScriptRoot 'ExploitProtectionTools.ps1')
+. (Join-Path $PSScriptRoot 'TrayTools.ps1')
 
 # Check this before anything on the machine is changed.
 if ($BlockChildProcesses -and $AllowChildProcesses) {
@@ -92,6 +103,13 @@ if (-not $SkipService) {
     $ServicePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ServicePath)
     if (-not (Test-Path -LiteralPath (Join-Path $ServicePath $script:GuardExeName) -PathType Leaf)) {
         throw "No published service in '$ServicePath'. Publish it first with '.\build.ps1 -Publish' (no admin rights needed), or pass -SkipService to install only the sensor."
+    }
+}
+if (-not $SkipTray) {
+    if (-not $TrayPath) { $TrayPath = Join-Path $PSScriptRoot '..\artifacts\tray' }
+    $TrayPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TrayPath)
+    if (-not (Test-Path -LiteralPath (Join-Path $TrayPath $script:TrayExeName) -PathType Leaf)) {
+        throw "No published tray application in '$TrayPath'. Publish it first with '.\build.ps1 -Publish' (no admin rights needed), or pass -SkipTray."
     }
 }
 
@@ -271,4 +289,11 @@ elseif ($serviceIsOurs) {
 }
 else {
     Write-Host 'The guard service was not installed (-SkipService). Watch the events with: .\show-events.ps1 -Follow'
+}
+
+# --- 7. The tray application -------------------------------------------------------------------
+if (-not $SkipTray) {
+    Install-GuardTray $TrayPath
+    Start-GuardTray
+    Write-Host "RCEGuard tray application installed ('$script:TrayInstallDir'). It starts for every user at sign-in and was started now: look for the shield next to the clock."
 }

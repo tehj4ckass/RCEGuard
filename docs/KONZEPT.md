@@ -854,5 +854,38 @@ der Tray-App. (4) Abnahme.
   - *Nicht geprüft:* die App neben einem installierten Dienst (echter Befund, Hinweis von Windows, Symbolwechsel);
     die Freigabe mit Admin-Abfrage; Lesen von `findings.db` als Benutzer ohne Schreibrecht im Datenordner (die
     Tests laufen in einem eigenen Ordner); mehrere Benutzer; hohe Bildschirmskalierung.
-  - *Offen für Schritt 3:* `build.ps1 -Publish` und `install.ps1` für die Tray-App (Ort, Autostart für alle
-    Benutzer), `uninstall.ps1` (Autostart, laufende Tray-App, `tray-state.txt` des Benutzers), Profilverwaltung.
+- **Schritt 3 (15.11.2026): Tray-App installieren, automatisch starten, entfernen.** Noch nicht als Administrator
+  gelaufen. Die Profilverwaltung aus dem Meilenstein ist nicht gebaut (siehe unten).
+  - *Veröffentlichung:* `build.ps1 -Publish` legt die Tray-App nach `artifacts\tray`, self-contained wie den
+    Dienst (162 MB). Framework-abhängig wäre sie klein, bräuchte aber eine .NET-Desktop-Laufzeit, die jeder Benutzer
+    des Rechners nutzen kann; das SDK liegt hier im Profil des Benutzers, der baut, und gespielt werden soll mit
+    einem anderen Konto ohne Admin-Rechte (Abschnitt 3).
+  - *Eigener Ordner `C:\Program Files\RCEGuard Tray`,* nicht im Ordner des Dienstes: Der wird bei jeder
+    Installation des Dienstes gelöscht und neu angelegt, und das scheitert, solange ein Programm daraus läuft. So
+    bleibt die Tray-App auch stehen (und zeigt „läuft nicht“), wenn der Dienst nach einem gescheiterten Start
+    wieder entfernt wird.
+  - *Autostart:* Wert `RCEGuard.Tray` unter `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run`, also für jeden
+    Benutzer bei der Anmeldung. `-SkipTray` lässt die Tray-App weg.
+  - *Start ohne Admin-Rechte:* `install.ps1` läuft mit Admin-Rechten; direkt daraus gestartet hätte die Tray-App
+    sie auch. Sie wird deshalb über `explorer.exe "<Pfad>"` gestartet. `install-test.ps1` prüft das am laufenden
+    Prozess (Token-Abfrage `TokenElevation`, ohne etwas vom Prozess zu lesen).
+  - *Entfernen (`Uninstall-GuardTray`):* beendet die Tray-App aller Benutzer, entfernt Ordner, Run-Wert und die
+    Dateien `tray-state*.txt` in den Profilen aller Benutzer (Liste aus `ProfileList`; ein dadurch leerer Ordner
+    `%LOCALAPPDATA%\RCEGuard` geht mit, anderes darin bleibt). `uninstall.ps1` tut das als Erstes und auch ohne
+    Statusdatei, wie beim Dienst.
+  - *Im Trockenlauf gefunden:* `Test-Path` wirft für Profile von Systemkonten, in die der Benutzer nicht sehen darf
+    (`…\config\systemprofile`); jetzt `Directory.Exists`.
+  - *Geprüft, mit Stellvertretern in PowerShell 7 und 5.1* (Programme-Ordner und Benutzerprofile in TEMP, Run-Wert
+    und Profilliste unter `HKCU`, ein harmloses Programm als laufende Tray-App): 12 Fälle der Hilfsfunktionen
+    (installieren, bei laufender App aktualisieren, entfernen samt Stand zweier Benutzer, Fremdes im Ordner bleibt);
+    `install.ps1` und `uninstall.ps1` als Kopie über alle Läufe. Echt und ohne Admin-Rechte: Die veröffentlichte
+    Tray-App startet über den Explorer, Elternprozess `explorer`, nicht erhöht, 90 MB.
+  - *Nicht geprüft:* die Installation als Administrator; ob der Start über den Explorer aus einer erhöhten Konsole
+    wirklich ohne Admin-Rechte ankommt (prüft `install-test.ps1`, Schritt C); der Autostart bei der Anmeldung; das
+    Entfernen bei einem zweiten angemeldeten Benutzer.
+  - *Nicht gebaut: Profilverwaltung.* Profile in der Tray-App zu bearbeiten hieße, die Konfiguration mit
+    Admin-Rechten zu schreiben und den Dienst neu zu starten. Bis das entschieden ist, bleibt es beim Bearbeiten von
+    `appsettings.json` als Administrator und einem Neustart des Dienstes. Entscheidung des Inhabers, ob und wie.
+  - *Ein Test ist einmal durchgefallen und ließ sich nicht wiederholen.* In einem Lauf von `build.ps1 -Publish`
+    meldete die Dienst-Suite 80 von 81; welcher Test es war, ging in meiner gefilterten Ausgabe verloren. 17 weitere
+    Läufe der ganzen Suite danach bestanden alle. Nicht geklärt.
