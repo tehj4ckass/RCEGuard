@@ -1295,3 +1295,41 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     Abfragen (die des Spiels zum Server steht die ganze Sitzung), fände er so auch dann, wenn Sysmon sie verpasst
     hat; sehr kurze Verbindungen fängt weiter nur Sysmon. Beide Quellen zusammen deckten ab, was eine allein
     auslässt.
+- **Gebaut (15.11.2026): die Verbindungstabelle von Windows als zweite Quelle.** Entscheidung des Inhabers nach der
+  Messung. Nicht am installierten Dienst gelaufen.
+  - *Lesen (`TcpConnections`, Dienst):* `GetExtendedTcpTable` für IPv4 und IPv6 mit der PID des Besitzers, also
+    die Liste von `netstat -o`. Kein Prozess wird dafür geöffnet. Aus den Zeilen eines Clients zählen nur
+    Verbindungen, die er selbst aufgebaut hat: keine lauschenden Sockets, keine auf einem eigenen lauschenden Port
+    angenommenen Verbindungen, nichts zu diesem Rechner (`OutboundOf`). Die Tabelle sagt die Richtung nicht; das ist
+    die Annäherung daran.
+  - *Entscheiden, was neu ist (`ConnectionWatch`, Kern):* Die Tabelle soll Lücken füllen, nicht doppelt melden. Eine
+    Verbindung, die Sysmon für diesen Prozess gemeldet hat, ist erledigt. Eine, die nur die Tabelle zeigt, muss
+    5 s lang zu sehen sein (Sysmon schreibt bis zu 3 s verspätet), dann gilt sie als von Sysmon verpasst und wird
+    einmal herausgegeben. Verschwindet sie vorher, wird sie vergessen: Für so kurze Verbindungen bleibt Sysmon die
+    einzige Quelle. Je Prozess höchstens 4096 Gegenstellen.
+  - *In der Wächterschleife:* Der Dienst kennt die laufenden Clients schon für R8 (Start und Ende aus dem
+    Sysmon-Log, Startzeit gegen wiederverwendete PIDs). Solange einer läuft, liest er alle 2 s Prozessliste und
+    Verbindungstabelle. Eine verpasste Verbindung schreibt er ins Log („found in the connection table of Windows;
+    Sysmon did not record it“) und gibt sie dann in der Form des Sysmon-Ereignisses an Regel-Engine und Lernmodus:
+    dieselbe Beurteilung (R2, Allowlist, Lernmodus), dieselben Notizen. Kein Schalter: Es gibt keinen Grund, die
+    zweite Quelle abzuschalten. Die Clients werden jetzt auch verfolgt, wenn R8 aus ist.
+  - *Kommt das Sysmon-Ereignis doch noch nach der Tabelle* (später als 5 s), wird es normal ausgewertet; ein Alarm
+    zählt dann als Wiederholung (Abschnitt 14), im Lernmodus wird die Verbindung zweimal gezählt. Die Zählung im
+    Lernmodus ist ohnehin keine Zahl der Verbindungen mehr, sondern „wie oft gesehen“.
+  - *Was bleibt:* Verbindungen, die nach weniger als etwa 5 bis 7 s wieder zu sind, sieht der Dienst nur über
+    Sysmon. Ein Client, der beim Start des Dienstes schon lief, wird nicht angesehen (wie bei R8). UDP steht nicht
+    in dieser Tabelle; Sysmon zeichnet UDP auf, der 3.3.5a-Client spricht TCP.
+  - *Geprüft:* 8 Tests im Kern (Wartezeit, einmal herausgeben, von Sysmon gemeldet, zu kurz, zwei Schreibweisen
+    einer Adresse, Prozesse getrennt, Obergrenze) und 9 im Dienst: die echte Tabelle dieses Rechners für IPv4 und
+    IPv6 (eigene Verbindung über einen lokalen Port: lauschender Socket, verbindendes und annehmendes Ende mit den
+    richtigen Ports und der eigenen PID), die Auswahl der Zeilen, und die Wächterschleife mit ausgedachter Tabelle
+    (verpasste Verbindung einmal gemeldet; von Sysmon gemeldete nicht noch einmal; erlaubte Adresse ohne Befund;
+    im Lernmodus notiert; zu kurze Verbindung nicht; Tabelle nicht lesbar: eine Warnung, Dienst läuft weiter). Alle
+    Suiten grün (276, 107, 29), die zeitabhängigen viermal hintereinander.
+  - *Messskript angepasst:* Es zeigt je Verbindung, was Sysmon aufgezeichnet und was der Wächter gesehen hat (über
+    Sysmon oder über die Tabelle), und zählt beides je Art. Die Clients leben jetzt 12 s statt 8 s, damit die
+    Tabelle Zeit hat (5 s Wartezeit, 2 s Takt). `-Install` bringt den installierten Dienst vorher auf den
+    veröffentlichten Stand. Trockenlauf in PowerShell 7 und 5.1 mit fünf Varianten.
+  - *Nicht geprüft:* der installierte Dienst (liest er als LocalSystem dieselbe Tabelle, findet er die Verbindung
+    eines fremden Prozesses rechtzeitig); die Last durch das Abfragen alle 2 s ist nicht gemessen, nur geschätzt
+    (zwei Systemaufrufe über einige hundert Zeilen).

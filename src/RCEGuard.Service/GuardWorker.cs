@@ -56,12 +56,18 @@ public sealed class GuardWorker : BackgroundService
     private readonly Stopwatch sinceLearnedSave = Stopwatch.StartNew();
     private readonly HashSet<string> learningProfiles = new(StringComparer.OrdinalIgnoreCase);
 
-    // R8: the clients that are running, by pid, as the Sysmon log told (start and end of a client).
+    // The clients that are running, by pid, as the Sysmon log told (start and end of a client). They are
+    // looked at between events: their processor time (R8) and their connections (what Sysmon did not record).
     private readonly Dictionary<int, WatchedClient> clients = [];
+    private bool watchClients;
+    private TimeSpan clientPollInterval;
+    private DateTimeOffset nextClientPoll;
     private CpuWatch? cpuWatch;
     private TimeSpan cpuPollInterval;
     private DateTimeOffset nextCpuPoll;
     private bool cpuReadFailed;
+    private ConnectionWatch? connectionWatch;
+    private bool connectionReadFailed;
 
     /// <summary>Opens the notifier for an ntfy topic. Tests put one here that sends nothing over the network.</summary>
     internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
@@ -72,6 +78,18 @@ public sealed class GuardWorker : BackgroundService
     /// Tests put a list here: what happens to run on the machine of the test must not decide them.
     /// </summary>
     internal Func<IReadOnlyList<ProcessEntry>> ListProcesses { get; init; } = ProcessSnapshot.Take;
+
+    /// <summary>Reads the TCP connection table of Windows. Tests put a made-up one here.</summary>
+    internal Func<IReadOnlyList<TcpConnection>> ReadConnections { get; init; } = TcpConnections.Take;
+
+    /// <summary>How often the connections of a running client are read from the connection table.</summary>
+    internal TimeSpan ConnectionPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// How long a connection must have been seen in the table without an event of Sysmon before it
+    /// counts as missed by Sysmon. Sysmon writes a connection up to three seconds after it was made.
+    /// </summary>
+    internal TimeSpan ConnectionGrace { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Reads the processor times of the running processes. Tests put made-up ones here.</summary>
     internal Func<IReadOnlyDictionary<int, ProcessTime>> ReadProcessTimes { get; init; } = ProcessTimes.Take;
@@ -188,6 +206,16 @@ public sealed class GuardWorker : BackgroundService
             }
         }
 
+        if (options.ReplayPath is null)
+        {
+            watchClients = true;
+            connectionWatch = new ConnectionWatch(ConnectionGrace);
+            clientPollInterval = cpuWatch is not null && cpuPollInterval < ConnectionPollInterval ? cpuPollInterval : ConnectionPollInterval;
+            logger.LogInformation(
+                "Connections of a running client are also read from the connection table of Windows: one that Sysmon did not record is found there once it has been open for {Grace} s",
+                ConnectionGrace.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         if (options.ReplayPath is not null)
         {
             Replay(options.ReplayPath, engine, store);
@@ -262,12 +290,12 @@ public sealed class GuardWorker : BackgroundService
                     firewallGuard.Apply(hosts.ByProfile);
                 }
 
-                PollCpu(killer, store);
+                PollClients(engine, killer, store);
 
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 var waitFor = unsaved is null ? idleWait : PositionSaveInterval;
                 // While a client runs, the loop must come round often enough to measure it.
-                wait.CancelAfter(cpuWatch is not null && clients.Count > 0 && cpuPollInterval < waitFor ? cpuPollInterval : waitFor);
+                wait.CancelAfter(clients.Count > 0 && clientPollInterval < waitFor ? clientPollInterval : waitFor);
                 LogEntry entry;
                 try
                 {
@@ -489,6 +517,7 @@ public sealed class GuardWorker : BackgroundService
         }
 
         TrackClient(sysmonEvent!);
+        TrackConnection(sysmonEvent!);
         foreach (var finding in findings)
         {
             if (Report(finding, killer, store, late))
@@ -500,10 +529,10 @@ public sealed class GuardWorker : BackgroundService
         return reported;
     }
 
-    /// <summary>Notes the start and the end of a client, so that R8 knows which processes to measure.</summary>
+    /// <summary>Notes the start and the end of a client, so that the guard knows which processes to look at between events.</summary>
     private void TrackClient(SysmonEvent e)
     {
-        if (cpuWatch is null || loadedConfig is null || e.EventId is not (SysmonEventIds.ProcessCreate or SysmonEventIds.ProcessTerminate))
+        if (!watchClients || loadedConfig is null || e.EventId is not (SysmonEventIds.ProcessCreate or SysmonEventIds.ProcessTerminate))
         {
             return;
         }
@@ -519,27 +548,54 @@ public sealed class GuardWorker : BackgroundService
         {
             if (clients.Remove(pid, out var ended))
             {
-                cpuWatch.Forget(ended.Key(pid));
+                Forget(pid, ended);
             }
         }
         else if (clients.Count < 256 || clients.ContainsKey(pid))
         {
             // An old event (read after a restart) may name a process that is long gone: the start
-            // time lets the measurement tell it from whatever has that pid now.
+            // time lets the look at the process list tell it from whatever has that pid now.
             clients[pid] = new WatchedClient(profile.Name, image, RuleEngine.ProcessStart(e));
         }
     }
 
-    /// <summary>R8: measures the running clients if it is time to, and reports one whose load has risen above the threshold.</summary>
-    private void PollCpu(ProcessKiller killer, FindingStore store)
+    /// <summary>Notes a connection Sysmon recorded for a running client: the connection table has nothing to add for it.</summary>
+    private void TrackConnection(SysmonEvent e)
     {
-        var now = DateTimeOffset.UtcNow;
-        if (cpuWatch is null || clients.Count == 0 || now < nextCpuPoll)
+        if (connectionWatch is null
+            || e.EventId != SysmonEventIds.NetworkConnect
+            || e.GetInt("ProcessId") is not { } pid
+            || !clients.TryGetValue(pid, out var client)
+            || !PathRules.Same(client.Image, e.Get("Image"))
+            || !IPAddress.TryParse(e.Get("DestinationIp"), out var address)
+            || e.GetInt("DestinationPort") is not { } port)
         {
             return;
         }
 
-        nextCpuPoll = now + cpuPollInterval;
+        connectionWatch.SeenBySensor(client.Key(pid), address, port);
+    }
+
+    private void Forget(int pid, WatchedClient client)
+    {
+        cpuWatch?.Forget(client.Key(pid));
+        connectionWatch?.Forget(client.Key(pid));
+    }
+
+    /// <summary>
+    /// Looks at the running clients if it is time to: at their processor time (R8) and at their
+    /// connections (those Sysmon did not record). Both come from lists of the operating system;
+    /// no client is opened for it.
+    /// </summary>
+    private void PollClients(RuleEngine engine, ProcessKiller killer, FindingStore store)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!watchClients || clients.Count == 0 || now < nextClientPoll)
+        {
+            return;
+        }
+
+        nextClientPoll = now + clientPollInterval;
         IReadOnlyDictionary<int, ProcessTime> times;
         try
         {
@@ -548,10 +604,11 @@ public sealed class GuardWorker : BackgroundService
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or PlatformNotSupportedException or OutOfMemoryException)
         {
+            // Without the start times a pid cannot be told from a reused one: nothing is looked at.
             if (!cpuReadFailed)
             {
                 cpuReadFailed = true;
-                logger.LogWarning("R8 cannot measure the clients: {Reason}", ex.Message);
+                logger.LogWarning("The running clients cannot be looked at (processor load, connections): {Reason}", ex.Message);
             }
 
             return;
@@ -563,19 +620,93 @@ public sealed class GuardWorker : BackgroundService
             if (!times.TryGetValue(pid, out var time) || (time.Created - client.Started).Duration() > TimeSpan.FromSeconds(2))
             {
                 clients.Remove(pid);
-                cpuWatch.Forget(client.Key(pid));
-                continue;
+                Forget(pid, client);
+            }
+        }
+
+        if (clients.Count == 0)
+        {
+            return;
+        }
+
+        if (cpuWatch is not null && now >= nextCpuPoll)
+        {
+            nextCpuPoll = now + cpuPollInterval;
+            foreach (var (pid, client) in clients)
+            {
+                var verdict = cpuWatch.Sample(client.Key(pid), now, times[pid].Cpu);
+                if (verdict.Cores is { } cores && learner is not null && learner.NoteCpu(client.Profile, cores))
+                {
+                    learnedUnsaved = true;
+                }
+
+                if (verdict.Alert)
+                {
+                    Report(cpuWatch.ToFinding(client.Profile, client.Image, pid, verdict.Cores!.Value, now), killer, store, late: false);
+                }
+            }
+        }
+
+        PollConnections(now, engine, killer, store);
+    }
+
+    /// <summary>Finds connections of the running clients that Sysmon did not record, and judges them like recorded ones.</summary>
+    private void PollConnections(DateTimeOffset now, RuleEngine engine, ProcessKiller killer, FindingStore store)
+    {
+        if (connectionWatch is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<TcpConnection> table;
+        try
+        {
+            table = ReadConnections();
+            connectionReadFailed = false;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or OutOfMemoryException or EntryPointNotFoundException or DllNotFoundException)
+        {
+            if (!connectionReadFailed)
+            {
+                connectionReadFailed = true;
+                logger.LogWarning("The connection table of Windows cannot be read; connections Sysmon does not record stay unseen: {Reason}", ex.Message);
             }
 
-            var verdict = cpuWatch.Sample(client.Key(pid), now, time.Cpu);
-            if (verdict.Cores is { } cores && learner is not null && learner.NoteCpu(client.Profile, cores))
-            {
-                learnedUnsaved = true;
-            }
+            return;
+        }
 
-            if (verdict.Alert)
+        foreach (var (pid, client) in clients)
+        {
+            foreach (var missed in connectionWatch.Poll(client.Key(pid), now, TcpConnections.OutboundOf(pid, table)))
             {
-                Report(cpuWatch.ToFinding(client.Profile, client.Image, pid, verdict.Cores!.Value, now), killer, store, late: false);
+                logger.LogInformation(
+                    "Connection of {Image} (pid {Pid}) to {Address} port {Port} found in the connection table of Windows; Sysmon did not record it",
+                    client.Image, pid, missed.Address, missed.Port);
+
+                // In the shape of the event Sysmon would have written, so that it is judged and learned the same way.
+                var asEvent = new SysmonEvent(
+                    SysmonEventIds.NetworkConnect,
+                    RecordId: 0,
+                    now,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["RuleName"] = "connection-table",
+                        ["Image"] = client.Image,
+                        ["ProcessId"] = pid.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["DestinationIp"] = missed.Address.ToString(),
+                        ["DestinationPort"] = missed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["Initiated"] = "true",
+                    });
+                var findings = engine.Evaluate(asEvent);
+                if (learner is not null && learner.Observe(asEvent, findings))
+                {
+                    learnedUnsaved = true;
+                }
+
+                foreach (var finding in findings)
+                {
+                    Report(finding, killer, store, late: false);
+                }
             }
         }
     }
@@ -754,7 +885,7 @@ public sealed class GuardWorker : BackgroundService
     };
 }
 
-/// <summary>A running client that R8 measures.</summary>
+/// <summary>A running client the guard looks at between events.</summary>
 /// <param name="Profile">Name of its profile.</param>
 /// <param name="Image">Full path of the client.</param>
 /// <param name="Started">When the process was started, as the Sysmon event said.</param>

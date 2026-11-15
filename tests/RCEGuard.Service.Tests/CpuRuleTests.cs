@@ -162,7 +162,9 @@ public sealed class CpuRuleTests : IDisposable
         var lines = await RunAsync(Worker(Busy(8.0, ClientStarted, looks), ClientEvent(1)), _ => false, timeoutMs: 3_000);
 
         Assert.DoesNotContain(lines, line => line.Contains("R8"));
-        Assert.Empty(looks);
+        // The process list is still read (the look at the connections needs the start times), but nothing is measured.
+        Assert.NotEmpty(looks);
+        Assert.Equal(0, Assert.Single(new LearnedFile(Path.Combine(folder, LearnedFile.FileName)).Load(out _)).PeakCpuCores);
     }
 
     [Fact]

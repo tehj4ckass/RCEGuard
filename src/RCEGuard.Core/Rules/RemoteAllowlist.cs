@@ -65,7 +65,7 @@ public sealed class RemoteAllowlist
     }
 
     /// <summary>Treats IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) as IPv4.</summary>
-    internal static IPAddress Normalize(IPAddress address) =>
+    public static IPAddress Normalize(IPAddress address) =>
         address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 }
 

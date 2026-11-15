@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-    Measures how reliably Sysmon records the connections of the test client: of a connection that
-    is closed right after it is made, and of one that stays open.
+    Measures how reliably Sysmon records the connections of the test client (of a connection that
+    is closed right after it is made, and of one that stays open), and what the guard sees in
+    the end, with the connection table of Windows as its second source.
 
 .DESCRIPTION
     A measurement, not a test of the guard. In the acceptance runs of 2026-11-15 Sysmon recorded
@@ -15,12 +16,15 @@
          no notification comes up) and restarts the service,
       2. lets the simulator connect -Count times in each way, taking turns, to the addresses
          in -Addresses in turn, and asks the Sysmon log after each connection whether it is in there,
-      3. counts what Sysmon recorded per kind, and whether the guard reported every recorded one,
+      3. counts per kind what Sysmon recorded and what the guard saw: through Sysmon, or, for a
+         connection that stayed open and that Sysmon did not record, in the connection table of
+         Windows (the guard looks there every 2 s and takes a connection that has been open for 5 s),
       4. puts the configuration and the notes of the learning mode back.
 
     Needs an administrator PowerShell, an internet connection, and RCEGuard installed for the
-    test client (install.ps1, or one of the tests before). It does not install anything and does
-    not change the configuration of Sysmon. The result goes to <OutDir>\sensor-probe-result.txt.
+    test client (install.ps1, or one of the tests before). Without -Install it installs nothing
+    and does not change the configuration of Sysmon. The result goes to
+    <OutDir>\sensor-probe-result.txt.
 
 .PARAMETER TestDir
     Folder with the simulator (Wow.exe).
@@ -44,11 +48,18 @@
     How long each client stays alive after connecting (and, for the second kind, keeps the
     connection open).
 
+.PARAMETER Install
+    Run install.ps1 for the test client first, to bring the installed service and tray
+    application up to what '.\build.ps1 -Publish' last published. Sysmon must be installed.
+
 .PARAMETER AllowNonAdmin
     Skip the administrator check. Only useful for trying the script itself with stand-ins.
 
 .EXAMPLE
     .\scripts\sensor-probe.ps1
+
+.EXAMPLE
+    .\scripts\sensor-probe.ps1 -Install
 #>
 [CmdletBinding()]
 param(
@@ -58,7 +69,8 @@ param(
     [string[]] $Addresses = @('1.1.1.1', '9.9.9.9', '8.8.8.8'),
     [int] $Port = 443,
     [int] $Count = 10,
-    [int] $HoldSeconds = 8,
+    [int] $HoldSeconds = 12,
+    [switch] $Install,
     [switch] $AllowNonAdmin
 )
 
@@ -77,6 +89,10 @@ $configBackup = Join-Path $DataDir 'appsettings.json.before-sensor-probe'
 $learnedPath = Join-Path $DataDir 'learned.json'
 $learnedBackup = Join-Path $DataDir 'learned.json.before-sensor-probe'
 $guardLog = Join-Path $DataDir $script:GuardLogName
+
+function Install-ForTest {
+    & (Join-Path $PSScriptRoot 'install.ps1') -ClientPath $client | Out-Host
+}
 
 function Invoke-Client([string[]] $arguments) {
     # Runs the simulator and returns its pid, its exit code and what it printed.
@@ -118,6 +134,10 @@ if (-not $isAdmin -and -not $AllowNonAdmin) {
 }
 if (-not (Test-Path -LiteralPath $client -PathType Leaf)) {
     throw "Simulator not found: '$client'. Publish it with: dotnet publish src\RCEGuard.FakeWow -c Release -o $TestDir"
+}
+if ($Install) {
+    Write-Host "Installing RCEGuard for '$client' ..." -ForegroundColor Cyan
+    Install-ForTest
 }
 if (-not (Test-Path -LiteralPath $guardLog)) {
     throw "The log of the service was not found: '$guardLog'. Install RCEGuard for the test client first: .\scripts\install.ps1 -ClientPath '$client'"
@@ -190,7 +210,9 @@ try {
                 Pid      = $clientPid
                 Client   = $(if ($connected) { "connected$(if ($open) { ", $open" })" } else { 'NOT connected' })
                 Sysmon   = $(if (-not $connected) { '-' } elseif ($null -ne $record) { "recorded after $(($record.Written - $started).TotalSeconds.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) s" } else { 'NOT recorded' })
+                Guard    = ''
                 Recorded = ($null -ne $record)
+                InTable  = $false
                 Counted  = $connected
             }
             $rows += $row
@@ -198,9 +220,19 @@ try {
         }
     }
 
-    # What the guard made of them: one "learning mode" line per connection it was given.
+    # What the guard made of them: one "learning mode" line per connection it was given, and one line
+    # with the pid for every connection it found in the connection table because Sysmon had not recorded it.
     Start-Sleep -Seconds 3
-    $guardLines = @((Read-TextFrom $guardLog $logStart) -split "`r?`n" | Where-Object { $_ -match "R2 INFO \[$profileName\] Learning mode: the game client connected to " }).Count
+    $logLines = @((Read-TextFrom $guardLog $logStart) -split "`r?`n")
+    $guardLines = @($logLines | Where-Object { $_ -match "R2 INFO \[$profileName\] Learning mode: the game client connected to " }).Count
+    foreach ($row in $rows) {
+        $row.InTable = @($logLines | Where-Object { $_ -match "\(pid $($row.Pid)\) to .* found in the connection table of Windows" }).Count -gt 0
+        $row.Guard = if (-not $row.Counted) { '-' }
+            elseif ($row.Recorded -and $row.InTable) { 'seen (Sysmon and connection table)' }
+            elseif ($row.Recorded) { 'seen (Sysmon)' }
+            elseif ($row.InTable) { 'seen (connection table)' }
+            else { 'NOT seen' }
+    }
 }
 catch {
     $stopped = [string] $_.Exception.Message
@@ -230,17 +262,20 @@ $report = @(
     ''
 )
 if ($rows.Count -gt 0) {
-    $report += ($rows | Format-Table Time, Kind, Address, Pid, Client, Sysmon -AutoSize | Out-String -Width 200).Trim()
+    $report += ($rows | Format-Table Time, Kind, Address, Pid, Client, Sysmon, Guard -AutoSize | Out-String -Width 220).Trim()
     $report += ''
     foreach ($kind in $kinds) {
         $of = @($rows | Where-Object { $_.Kind -eq $kind.Name -and $_.Counted })
         $recorded = @($of | Where-Object { $_.Recorded })
-        $report += ('{0,-15} Sysmon recorded {1} of {2} connections' -f ($kind.Name + ':'), $recorded.Count, $of.Count)
+        $seen = @($of | Where-Object { $_.Recorded -or $_.InTable })
+        $onlyTable = @($of | Where-Object { $_.InTable -and -not $_.Recorded })
+        $report += ('{0,-15} Sysmon recorded {1} of {2}; the guard saw {3} of {2} ({4} only through the connection table)' -f ($kind.Name + ':'), $recorded.Count, $of.Count, $seen.Count, $onlyTable.Count)
     }
-    $recordedAll = @($rows | Where-Object { $_.Recorded }).Count
+    # One line per connection from Sysmon, one per connection taken from the table.
+    $expected = @($rows | Where-Object { $_.Recorded }).Count + @($rows | Where-Object { $_.InTable }).Count
     if (-not $stopped) {
         $report += ''
-        $report += "The guard reported $guardLines connection(s); Sysmon recorded $recordedAll of this run.$(if ($guardLines -ne $recordedAll) { ' THESE DIFFER.' })"
+        $report += "The guard reported $guardLines connection(s); from what Sysmon recorded and what the guard took from the table, $expected were to be expected.$(if ($guardLines -ne $expected) { ' THESE DIFFER.' })"
     }
     $notConnected = @($rows | Where-Object { -not $_.Counted }).Count
     if ($notConnected -gt 0) { $report += "$notConnected time(s) the client did not get a connection; those are not counted." }
