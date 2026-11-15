@@ -926,9 +926,10 @@ der Tray-App. (4) Abnahme.
     (17:17:58 bis 17:18:03), das die Tray-App beendet und über den Explorer neu startet; die Benachrichtigung eines
     gerade beendeten Programms bleibt stehen, und die neu gestartete App meldet sofort. Das passiert nur bei einer
     Installation, nicht im Betrieb. Nicht weiter verfolgt, solange es im Betrieb nicht wieder auftritt.
-  - *Offen aus der Mitschrift:* Nach der Auswahl ging der Fokus zweimal an `ShellExperienceHost`, 1,7 s und 1,3 s
-    nach der dritten und vierten Benachrichtigung. Ob das Klicks des Inhabers waren oder ob eine Benachrichtigung
-    den Fokus von sich aus nimmt, ist nicht festgestellt. Das zweite wäre für ein Spiel im Vollbild von Belang.
+  - *Aus der Mitschrift geklärt:* Nach der Auswahl ging der Fokus zweimal an `ShellExperienceHost`, 1,7 s und 1,3 s
+    nach der dritten und vierten Benachrichtigung. Das waren Klicks des Inhabers auf die Benachrichtigungen (seine
+    Auskunft). Dass eine Benachrichtigung den Fokus von sich aus nimmt, zeigt die Mitschrift also nicht; mit einem
+    Spiel im Vollbild ist es nicht geprüft.
   - *Hinweise gebündelt.* Unabhängig von der Ursache war die Serie zu viel: höchstens ein Hinweis in zehn Sekunden
     (`MainViewModel.ToastPause`); was dazwischen kommt, wird danach gemeinsam gemeldet. Symbol und Liste folgen
     sofort. Test mit gestellter Uhr nach dem Muster des Laufs.
