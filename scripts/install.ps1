@@ -58,12 +58,23 @@
 .PARAMETER AllowChildProcesses
     Takes back what -BlockChildProcesses did: the setting goes back to what it was before.
 
+.PARAMETER Learning
+    For the first sessions with a client: writes a configuration (appsettings.json in the data
+    folder) with this client as the only profile, in learning mode. RCEGuard then watches the
+    client and notes what it does, but terminates and blocks nothing; see "Learning mode" in the
+    README. Only if there is no configuration yet: an existing one is never changed by this
+    script. Learning mode is turned off again by hand, in that file.
+
 .EXAMPLE
     .\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -DownloadSysmon -AcceptSysmonEula
 
 .EXAMPLE
     .\install.ps1 -ClientPath 'C:\RCEGuardTest\Wow.exe'
     Points an already installed RCEGuard sensor at another client (e.g. the simulator).
+
+.EXAMPLE
+    .\install.ps1 -ClientPath 'D:\Games\Warmane\Wow.exe' -Learning
+    Points RCEGuard at the game client and starts with learning mode.
 #>
 [CmdletBinding()]
 param(
@@ -77,7 +88,8 @@ param(
     [string] $TrayPath,
     [switch] $SkipTray,
     [switch] $BlockChildProcesses,
-    [switch] $AllowChildProcesses
+    [switch] $AllowChildProcesses,
+    [switch] $Learning
 )
 
 Set-StrictMode -Version Latest
@@ -86,6 +98,7 @@ $ErrorActionPreference = 'Stop'
 $dataDir = Join-Path $env:ProgramData 'RCEGuard'
 $configPath = Join-Path $dataDir 'sysmon-config.xml'
 $statePath = Join-Path $dataDir 'install-state.json'
+$settingsPath = Join-Path $dataDir 'appsettings.json'
 $sysmonUrl = 'https://download.sysinternals.com/files/Sysmon.zip'
 
 . (Join-Path $PSScriptRoot 'SysmonTools.ps1')
@@ -109,6 +122,13 @@ if ($null -eq (Get-InstalledSysmon)) {
 }
 if ($BlockChildProcesses -and $AllowChildProcesses) {
     throw 'Use either -BlockChildProcesses or -AllowChildProcesses, not both.'
+}
+if ($Learning -and (Test-Path -LiteralPath $settingsPath)) {
+    # Somebody wrote that file on purpose (allowlists, notifications): it is not this script's to change.
+    throw "There is a configuration already ('$settingsPath'), and install.ps1 does not change it. To learn, set `"learning`": true in the profile of the client there and restart the service (Restart-Service RCEGuard). Run install.ps1 without -Learning to keep the configuration as it is."
+}
+if ($Learning -and $SkipService) {
+    throw '-Learning is about the guard service; it cannot be combined with -SkipService.'
 }
 if (-not $SkipService) {
     # Not a param default: under 'powershell.exe -File' $PSScriptRoot is still empty in the param block.
@@ -279,6 +299,14 @@ if ($block.Problem) {
 Write-Host ''
 Write-Host "RCEGuard sensor is active for '$([IO.Path]::GetFullPath($ClientPath))'."
 
+if ($Learning) {
+    # Before the service starts: it reads the configuration once, at its start.
+    $settings = [ordered]@{
+        profiles = @([ordered]@{ name = 'Default'; clientPath = [IO.Path]::GetFullPath($ClientPath); learning = $true })
+    }
+    [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
+}
+
 # --- 6. The guard service ----------------------------------------------------------------------
 if (-not $SkipService) {
     Install-GuardService $ServicePath $installed.ServiceName $dataDir
@@ -300,4 +328,12 @@ if (-not $SkipTray) {
     Install-GuardTray $TrayPath
     Start-GuardTray
     Write-Host "RCEGuard tray application installed ('$script:TrayInstallDir'). It starts for every user at sign-in and was started now: look for the shield next to the clock."
+}
+
+if ($Learning) {
+    Write-Host ''
+    Write-Host 'Learning mode is ON for this client.' -ForegroundColor Yellow
+    Write-Host '  RCEGuard watches the client and notes what it does. It terminates nothing and blocks nothing: the client is NOT protected while this is on.' -ForegroundColor Yellow
+    Write-Host "  After a session or two, look at what was noted: the button `"What was learned ...`" in the window of the tray application, or '$(Join-Path $script:GuardInstallDir $script:GuardExeName)' --learned" -ForegroundColor Yellow
+    Write-Host "  Then put what you recognise into '$settingsPath', set `"learning`": false there and run: Restart-Service RCEGuard" -ForegroundColor Yellow
 }

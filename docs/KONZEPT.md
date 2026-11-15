@@ -1372,3 +1372,32 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     fünf Symbole in Bilder gezeichnet und angesehen.
   - *Nicht geprüft:* die Tray-App neben dem installierten Dienst mit einem lernenden Profil (Symbolwechsel, Knopf,
     Kopieren in die Zwischenablage); `learned.json` lesen, während der Dienst sie gerade ersetzt.
+
+## 20. Vorbereitung der Sitzung mit dem echten Client (15.11.2026)
+
+- *Schalter `install.ps1 -Learning`:* schreibt `appsettings.json` mit dem Client als einzigem Profil (`Default`) im
+  Lernmodus, bevor der Dienst startet. Nur wenn es noch keine Konfiguration gibt; eine vorhandene Datei fasst das
+  Skript nie an (dann bricht es ab, bevor es etwas ändert, und sagt, was von Hand zu tun ist). Mit `-SkipService`
+  nicht kombinierbar. Am Ende sagt das Skript in Gelb, dass der Client nicht geschützt ist und wie es weitergeht.
+  Ausgeschaltet wird der Lernmodus von Hand in der Datei; einen Schalter dafür gibt es nicht, weil dabei auch die
+  Allowlist einzutragen ist.
+- *Geprüft, mit Stellvertretern in PowerShell 7 und 5.1* (ProgramData in TEMP, Sysmon „schon installiert“, Dienst
+  und Tray-App ersetzt): 10 Prüfungen, darunter: ohne Schalter keine Datei; mit Schalter steht die Datei, bevor der
+  Dienst startet, ohne Byte-Order-Mark; **der echte, gebaute Dienst liest sie und sieht das Profil als lernend**
+  (`--learned` auf dem Stellvertreter-Ordner); zweiter Aufruf mit Schalter und eine von Hand geschriebene
+  Konfiguration werden abgelehnt, ohne etwas zu ändern. Der frühere Trockenlauf für die Exploit-Protection-Schalter
+  besteht weiter (0 Fehler in beiden Versionen).
+- *Am Rechner des Inhabers nachgesehen, nur lesend:* Die Sysmon-Konfiguration lässt sich für den Pfad des echten
+  Clients erzeugen (Pfad mit Leerzeichen; wohlgeformtes XML, kein Platzhalter übrig); die sechs Datenordner, die
+  der Sensor ausnimmt (`Cache`, `WTF`, `Logs`, `Interface`, `Screenshots`, `Errors`), gibt es im Spielordner. Im
+  Spielordner liegt neben dem Client ein zweites Programm (ein Patch-Menü). Startet der Client es, ist das R1
+  (im Lernmodus gemeldet, nicht beendet); startet es den Client, sieht der Wächter davon nichts.
+- *Nicht geprüft:* `install.ps1 -Learning` als Administrator; alles am echten Client.
+- *Worauf die Sitzung Antworten geben soll:* (1) Akzeptanzkriterium aus Abschnitt 11: keine Befunde HOCH oder
+  KRITISCH in einer normalen Sitzung, also welche Regeln beim echten Client fälschlich feuern; (2) welche Adressen
+  und Namen, über Sysmon oder über die Verbindungstabelle; (3) welche Programme der Client öffnet und mit welchen
+  Rechten (R7: fordert er „alle Rechte“ an?); (4) höchste Prozessorlast gegen die 2,0 Kerne von R8; (5) ob die
+  Tray-Anzeige im Betrieb stimmt.
+- *Datenschutz:* Log, Notizen und Befunde einer echten Sitzung enthalten die Adressen der Server und Pfade mit dem
+  Windows-Benutzernamen. Nichts davon kommt ins Repo (Regel in `CLAUDE.md`: keine echten Server-IPs); in die Doku
+  gehen nur Anzahlen und Regelnamen.
