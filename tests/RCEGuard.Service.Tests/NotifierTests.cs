@@ -208,9 +208,17 @@ public sealed class NotifierTests : IDisposable
 
     private const string WithTopic = """ "notify":{"ntfy":{"url":"https://ntfy.example.org/my-topic"}}, """;
 
+    /// <summary>
+    /// The processes the guard finds running when it stops. None by default: a program named like the
+    /// test client on the machine of the test (the simulator, or a real game client: Windows compares
+    /// the names without case) would otherwise add a "stopping while the client runs" notification.
+    /// </summary>
+    private Func<IReadOnlyList<ProcessEntry>> runningProcesses = () => [];
+
     private GuardWorker Worker(FakeNotifier notifier, ServiceOptions? options = null, params string[] events) =>
         new(options ?? new ServiceOptions { DataDirectory = folder, LogName = "Application" }, new ListLogger(), new Lifetime())
         {
+            ListProcesses = () => runningProcesses(),
             OpenFirewall = () => new FakeFirewall(),
             OpenNotifier = (_, _) => notifier,
             DeliveryGrace = TimeSpan.FromSeconds(1),
@@ -347,6 +355,7 @@ public sealed class NotifierTests : IDisposable
         try
         {
             WriteConfig(WithTopic, client: Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+            runningProcesses = ProcessSnapshot.Take;   // the real list: this test is about it
             var notifier = new FakeNotifier();
 
             var lines = await RunAsync(Worker(notifier), logged => logged.Any(line => line.Contains("Subscribed to")));

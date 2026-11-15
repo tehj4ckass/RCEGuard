@@ -938,7 +938,9 @@ der Tray-App. (4) Abnahme.
     `appsettings.json` als Administrator und einem Neustart des Dienstes. Entscheidung des Inhabers, ob und wie.
   - *Ein Test ist einmal durchgefallen und ließ sich nicht wiederholen.* In einem Lauf von `build.ps1 -Publish`
     meldete die Dienst-Suite 80 von 81; welcher Test es war, ging in meiner gefilterten Ausgabe verloren. 17 weitere
-    Läufe der ganzen Suite danach bestanden alle. Nicht geklärt.
+    Läufe der ganzen Suite danach bestanden alle. Nicht geklärt. *Nachtrag (15.11.2026, 20:00):* Eine mögliche
+    Ursache ist gefunden, siehe Abschnitt 17, Schritt 5 („Tests hingen am Rechner“); dass sie es damals war, ist
+    nicht belegt.
 - **Schritt 4 (15.11.2026): Abnahme der Freigabe aus dem Fenster (`scripts\tray-test.ps1`).** Als Administrator
   bestanden (17:38, 9 von 9), siehe unten.
   - *Warum ein eigenes Skript mit einem Menschen am Bildschirm:* Die Freigabe besteht aus einem Klick im Fenster und
@@ -991,6 +993,8 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
 4. **Vorschlag in der Tray-App** und Anzeige, dass ein Profil lernt. Hängt an der offenen Entscheidung zur
    Profilverwaltung (Abschnitt 16).
 5. **Abnahme am installierten Dienst** mit dem Simulator; danach die Sitzung mit dem echten Client (Abschnitt 11).
+   Das Skript ist gebaut (vor der Tray-Anzeige, weil aus den Schritten 1 bis 3 zu viel nur mit Tests belegt war),
+   siehe unten.
 
 - **Schritt 1 (15.11.2026): Lernmodus sammelt und schlägt vor.** Nicht am installierten Dienst gelaufen.
   - *Schalter:* `"learning": true` je Profil, Standard aus. Kein Zähler für Sitzungen und kein automatisches Ende:
@@ -1105,3 +1109,43 @@ M5 ist „Lernmodus, R7, R8“. Geplante Schritte:
     Alle Suiten grün (264, 98, 29), die zeitabhängigen Tests viermal hintereinander.
   - *Nicht geprüft:* R8 am installierten Dienst mit `--cpu` (ob Sysmon-Startzeit und Startzeit der Prozessliste
     wirklich auf 2 s übereinstimmen, zeigt erst dieser Lauf); die Last des echten Clients.
+- **Schritt 5 (15.11.2026): Abnahmeskript `scripts\learning-test.ps1`.** Noch nicht als Administrator gelaufen.
+  - *Zwei Teile:* (1) Lernen: Profil mit `learning`, dazu `lockdown` und `killOnUnknownRemote` an, damit sichtbar
+    wird, dass der Lernmodus beides zurückhält. Der Simulator verbindet sich mit einem Hostnamen und einer Adresse,
+    startet ein Programm, öffnet den Explorer (lesen, dann mit Rechten zum Verändern), legt eine Programmdatei an und
+    lastet 25 s alle Kerne aus (R8 hier: 1,5 Kerne über 10 s). Geprüft wird am Log des Dienstes, an `lockdown.json`,
+    den Firewall-Regeln und an der Ausgabe von `--learned`. (2) Wieder urteilen: Der Vorschlag wird so übernommen,
+    wie `--learned` ihn druckt, Lernmodus aus; Gelerntes bleibt still, eine nicht gelernte Adresse ist ein Alarm,
+    Ansehen des Explorers ist still, Rechte zum Verändern nicht, ein gestartetes Programm wird beendet.
+  - *Der Hostname* (`one.one.one.one`) ist drin, weil der Lernmodus Namensabfragen (Ereignis 22) bisher nur aus dem
+    dokumentierten Format liest; der Lauf zeigt, ob das echte Sysmon sie so schreibt. Kommt keine, schlägt das
+    Skript die Adresse statt des Namens vor, und genau diese Prüfung fällt durch.
+  - *Verbindungen mit `--hold`:* Sysmon zeichnet die Verbindung eines Clients, der nach Sekunden endet, oft nicht auf
+    (Abschnitt 14); der Simulator bleibt deshalb nach jeder Verbindung 8 s am Leben.
+  - *Am Ende* stehen die Konfiguration und die Notizen von vorher wieder da (`learned.json` wird vor dem Test
+    beiseitegelegt: Notizen einer früheren Sitzung würden sonst mitgezählt). Die Sysmon-Ereignisse des Laufs gehen
+    nach `out\m5-events.xml`, als Rohmaterial für Fixtures (Ereignis 22, Ereignis 10 für ein fremdes Programm).
+  - *Geprüft, mit Stellvertretern in PowerShell 7 und 5.1:* Der Stellvertreter für den Dienst ist die echte
+    Regel-Engine: Jeder Aufruf des Simulators wird zu Ereignissen in Sysmon-Form, die der gebaute Dienst mit
+    `--replay` auswertet; seine Befundzeilen gehen ins Stellvertreter-Log, und `--learned` ist der echte Befehl auf
+    dem Stellvertreter-Datenordner. Damit sind die Textmuster des Skripts gegen die echten Ausgaben geprüft. Von
+    Hand im Stellvertreter: die Ereignisse selbst, die R8-Zeile und die höchste Last (eine Wiedergabe misst
+    nichts), die Adressen des erlaubten Hostnamens (eine Wiedergabe löst keine Namen auf). Drei Varianten: wie
+    gebaut (ALL PASSED, 23 Prüfungen), ein Dienst, der `learning` ignoriert (7 Prüfungen durchgefallen, Abbruch ohne
+    Vorschlag), Sysmon ohne Namensabfrage (genau die Namens-Prüfung durchgefallen). In allen Fällen waren
+    Konfiguration und Notizen von vorher zurück und nichts übrig. Echt und ohne Admin-Rechte nachgesehen: Name und
+    beide Adressen nehmen auf Port 443 Verbindungen an, der Name löst nicht auf eine der beiden Adressen auf, der
+    Rechner hat 16 Kerne.
+  - *Nicht geprüft:* alles am installierten Dienst (das ist der Lauf des Inhabers).
+  - *Tests hingen am Rechner (gefunden beim Veröffentlichen, 20:00).* Zwei Tests der Dienst-Suite
+    (`NotifierTests`) fielen durch, weil auf dem Rechner ein Programm namens `WoW.exe` lief (der echte Client des
+    Inhabers, seit 19:42): Der Wächter meldet beim Beenden „stopping while the client runs“, wenn ein Prozess mit
+    dem Dateinamen des Clients läuft, und Windows vergleicht Namen ohne Groß- und Kleinschreibung; die Tests
+    erwarteten genau eine Benachrichtigung. Die Prozessliste für diesen Blick ist jetzt in Tests ersetzbar
+    (`GuardWorker.ListProcesses`), die Tests sind unabhängig davon, was auf dem Rechner läuft. Das erklärt
+    möglicherweise auch den nicht wiederholbaren Durchfaller aus Abschnitt 16 (damals lief zeitnah der Simulator
+    als `Wow.exe`); belegt ist das nicht, das Log von damals gibt es nicht mehr.
+  - *Dabei aufgefallen, nicht geändert:* Dieser Blick beim Beenden geht nur nach dem Dateinamen. Läuft ein anderes
+    Programm gleichen Namens (hier: der echte Client, während der Dienst den Testclient überwacht), meldet der
+    Dienst beim Beenden fälschlich, der Client laufe noch. Es ist nur eine Warnung (und eine ntfy-Meldung, wenn
+    eingerichtet); R8 geht aus demselben Grund nicht nach dem Namen.

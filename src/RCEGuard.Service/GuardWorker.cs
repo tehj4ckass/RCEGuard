@@ -67,6 +67,12 @@ public sealed class GuardWorker : BackgroundService
     internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
         (config, log) => new NtfyNotifier(config, log);
 
+    /// <summary>
+    /// Lists the running processes, for the look at the end whether a client is still running.
+    /// Tests put a list here: what happens to run on the machine of the test must not decide them.
+    /// </summary>
+    internal Func<IReadOnlyList<ProcessEntry>> ListProcesses { get; init; } = ProcessSnapshot.Take;
+
     /// <summary>Reads the processor times of the running processes. Tests put made-up ones here.</summary>
     internal Func<IReadOnlyDictionary<int, ProcessTime>> ReadProcessTimes { get; init; } = ProcessTimes.Take;
 
@@ -701,7 +707,7 @@ public sealed class GuardWorker : BackgroundService
             try
             {
                 var names = loadedConfig.Profiles.Select(profile => Path.GetFileName(profile.ClientPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var running = ProcessSnapshot.Take().Select(process => process.Name).Where(names.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var running = ListProcesses().Select(process => process.Name).Where(names.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 if (running.Count > 0)
                 {
                     logger.LogWarning("RCEGuard is stopping while {Clients} is running: the client is not watched from now on", string.Join(", ", running));
