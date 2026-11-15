@@ -42,8 +42,8 @@ internal sealed class DataFolder : IDisposable
     public void Lock(string profile) => new LockdownFile(System.IO.Path.Combine(Path, LockdownFile.FileName)).Save(
         [new LockdownEntry(profile, new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero), "R1", "The game client started another program")]);
 
-    public MainViewModel ViewModel(ServiceState service = ServiceState.Running) =>
-        new(Path, new StatusReader(Path, () => service), new SeenFile(SeenPath));
+    public MainViewModel ViewModel(ServiceState service = ServiceState.Running, Func<DateTimeOffset>? clock = null) =>
+        new(Path, new StatusReader(Path, () => service), new SeenFile(SeenPath), clock);
 
     public void Dispose()
     {
@@ -266,6 +266,46 @@ public sealed class TrayModelTests : IDisposable
 
         Assert.Single(toasts);
         Assert.Equal(TrayKind.Watching, viewModel.State.Kind);
+    }
+
+    [Fact]
+    public void A_burst_of_findings_gives_one_pop_up_now_and_one_for_the_rest_after_a_pause()
+    {
+        var time = new DateTimeOffset(2026, 11, 15, 17, 17, 48, TimeSpan.Zero);
+        var viewModel = data.ViewModel(clock: () => time);
+        var toasts = Toasts(viewModel);
+        viewModel.Refresh();
+
+        // As in the run of 2026-11-15: six findings that notify within 15 seconds.
+        data.Add("R1", Severity.Critical, FindingAction.Kill, "first");
+        viewModel.Refresh();
+        Assert.Equal("RCEGuard: R1 CRITICAL [Default]", Assert.Single(toasts).Title);
+
+        time = time.AddSeconds(2);
+        data.Add("R2", Severity.Critical, FindingAction.Alert, "second");
+        viewModel.Refresh();
+        time = time.AddSeconds(4);
+        data.Add("R5", Severity.High, FindingAction.Alert, "third");
+        viewModel.Refresh();
+        time = time.AddSeconds(2);
+        viewModel.Refresh();
+
+        Assert.Single(toasts);                                   // eight seconds after the first: still quiet
+        Assert.Equal("3 new findings", viewModel.State.Headline); // but the icon and the count are up to date
+
+        time = time.AddSeconds(3);
+        viewModel.Refresh();                                      // no new finding is needed to end the wait
+        Assert.Equal(2, toasts.Count);
+        Assert.Equal("RCEGuard: 2 new findings", toasts[1].Title);
+        Assert.StartsWith("Most serious: R2 CRITICAL", toasts[1].Text);
+
+        time = time.AddSeconds(30);
+        viewModel.Refresh();
+        Assert.Equal(2, toasts.Count);                            // nothing is announced twice
+
+        data.Add("R4", Severity.Critical, FindingAction.Kill, "later");
+        viewModel.Refresh();
+        Assert.Equal(3, toasts.Count);                            // after the pause a new finding comes at once
     }
 
     [Fact]

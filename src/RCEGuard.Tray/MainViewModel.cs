@@ -24,13 +24,28 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private int unseen;
     private TrayState state = new(TrayKind.NotWatching, "RCEGuard", "RCEGuard", string.Empty);
     private string problem = string.Empty;
+    private readonly Func<DateTimeOffset> clock;
+    private readonly List<FindingRow> heldBack = [];
+    private DateTimeOffset lastToast = DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// At most one pop-up in this time. Findings come in bursts (one thing the client does can set
+    /// off several rules within seconds); a pop-up for each would cover the screen again and again.
+    /// What arrives in the meantime is announced together afterwards.
+    /// </summary>
+    internal static readonly TimeSpan ToastPause = TimeSpan.FromSeconds(10);
 
     /// <summary>Creates the view model for a data folder.</summary>
-    public MainViewModel(string dataDirectory, StatusReader statusReader, SeenFile seenFile)
+    /// <param name="dataDirectory">Data folder of the service.</param>
+    /// <param name="statusReader">Reads the status.</param>
+    /// <param name="seenFile">Remembers which finding was announced last.</param>
+    /// <param name="clock">The time; tests replace it.</param>
+    public MainViewModel(string dataDirectory, StatusReader statusReader, SeenFile seenFile, Func<DateTimeOffset>? clock = null)
     {
         DataDirectory = dataDirectory;
         this.statusReader = statusReader;
         this.seenFile = seenFile;
+        this.clock = clock ?? (() => DateTimeOffset.UtcNow);
         databasePath = Path.Combine(dataDirectory, "findings.db");
         lastNotifiedId = seenFile.Load();
     }
@@ -99,7 +114,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var status = statusReader.Read();
         try
         {
-            Announce(status);
+            Collect();
+            ShowHeldBack(status);
             Replace(Findings, FindingReader.ReadNewest(databasePath, ListLength));
             Problem = string.Empty;
         }
@@ -122,7 +138,34 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         State = TrayState.From(status, unseen);
     }
 
-    private void Announce(GuardStatus status)
+    /// <summary>Shows one pop-up for everything that is waiting, unless the last pop-up was a moment ago.</summary>
+    private void ShowHeldBack(GuardStatus status)
+    {
+        if (heldBack.Count == 0)
+        {
+            return;
+        }
+
+        if (!status.ToastEnabled)
+        {
+            heldBack.Clear();
+            return;
+        }
+
+        var now = clock();
+        if (now - lastToast < ToastPause)
+        {
+            return;
+        }
+
+        lastToast = now;
+        var (title, text) = ToastText.For(heldBack);
+        heldBack.Clear();
+        ToastRequested?.Invoke(title, text);
+    }
+
+    /// <summary>Takes in the findings that are new since the last look: they count as unseen and wait for their pop-up.</summary>
+    private void Collect()
     {
         var newest = FindingReader.MaxId(databasePath);
         if (lastNotifiedId is null)
@@ -153,11 +196,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
 
         unseen += fresh.Count;
-        if (status.ToastEnabled)
-        {
-            var (title, text) = ToastText.For(fresh);
-            ToastRequested?.Invoke(title, text);
-        }
+        heldBack.AddRange(fresh);
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IReadOnlyList<T> items)

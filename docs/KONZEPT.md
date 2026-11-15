@@ -899,6 +899,20 @@ der Tray-App. (4) Abnahme.
     das nicht weg. Jetzt prüft `install.ps1` Lizenz und Quelle von Sysmon, bevor es etwas anlegt, und
     `uninstall.ps1` entfernt einen Datenordner ohne Statusdatei, wenn nichts als `sysmon-config.xml` darin liegt
     (ein Ordner mit anderem Inhalt bleibt). Geprüft mit Stellvertretern in PowerShell 7 und 5.1 (6 Fälle).
+  - *Tray-App neben dem installierten Dienst (15.11.2026, 17:17): Hinweise kamen.* `prevention-test.ps1` mit
+    installierter Tray-App: ALL PASSED. Der Inhaber hat die Windows-Benachrichtigungen gesehen. Damit ist auch
+    bestätigt, dass die Tray-App ohne Admin-Rechte `findings.db` in dem für sie nur lesbaren Datenordner lesen kann,
+    während der Dienst sie offen hat.
+  - *Beobachtung des Inhabers: Die Hinweise haben „z. B. das Snipping Tool verhindert“.* Was genau geschah, weiß
+    ich nicht. In den Logs von Windows steht dazu nichts: kein Absturz, kein Fehler, kein Exploit-Protection-Ereignis
+    außer denen für `Wow.exe`; `SnippingTool.exe` wurde um 17:17:58 gestartet und lief danach. Die Regeln, die
+    Firewall-Regel und die Exploit-Protection-Einstellung gelten nur für den Pfad des Clients. Was in diesen
+    Sekunden zusammenkam: sechs meldende Befunde in 15 s (17:17:48 bis 17:18:03), und der Test hat die Tray-App
+    dreimal beendet und über den Explorer neu gestartet (jeder Lauf von `install.ps1`). Vermutung, nicht belegt: Die
+    Auswahl des Snipping Tools bricht ab, wenn ein anderes Fenster oder eine Benachrichtigung den Fokus bekommt.
+  - *Hinweise gebündelt.* Unabhängig von der Ursache war die Serie zu viel: höchstens ein Hinweis in zehn Sekunden
+    (`MainViewModel.ToastPause`); was dazwischen kommt, wird danach gemeinsam gemeldet. Symbol und Liste folgen
+    sofort. Test mit gestellter Uhr nach dem Muster des Laufs.
   - *Nicht gebaut: Profilverwaltung.* Profile in der Tray-App zu bearbeiten hieße, die Konfiguration mit
     Admin-Rechten zu schreiben und den Dienst neu zu starten. Bis das entschieden ist, bleibt es beim Bearbeiten von
     `appsettings.json` als Administrator und einem Neustart des Dienstes. Entscheidung des Inhabers, ob und wie.
