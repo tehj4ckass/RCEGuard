@@ -1513,3 +1513,22 @@ die Untersuchung in Abschnitt 18 und die Frage des Inhabers, ob es funktioniert 
   Abschnitt zum Anmelden braucht, wären sie ein Hinweis ohne Abhilfe. Geblieben sind der einmalige Hinweis am Ende
   von `install.ps1`, der Befehl `--check-client` und das Skript. Damit liest der laufende Dienst die Client-Datei
   gar nicht mehr, und die Tray-App auch nicht. Tests danach: 285, 113, 34, alle grün.
+- *Zwei Sitzungen mit der Konfiguration „nur melden“ (16.11.2026, 16:26 bis etwa 16:38 und ab 16:45).*
+  - *Konfiguration geladen (15:56, nachgesehen):* eine erlaubte Adresse, drei Hostnamen, Lernmodus aus,
+    „terminating processes is OFF (dry run)“, keine Warnung zur Namensauflösung.
+  - *Befunde:* 116, keiner davon ein Alarm und keiner, der beendet hätte: 113 R7 MITTEL (alle mit `0x10`, Speicher
+    lesen, über 39 verschiedene Programme; je Start des Clients ein Schwung) und 3 R4 Info (Schreibzugriff unter
+    `Services\Tcpip\Parameters`, je Start einer).
+  - *Verbindungen:* kein R2, also keine Verbindung außerhalb der Allowlist; die Hostnamen und die Realm-Adresse
+    decken ab, was der Client in diesen Sitzungen angesprochen hat. Vier Verbindungen (Port 80) hat der Dienst nur
+    über die Verbindungstabelle gesehen.
+  - *Prozessorlast:* kein R8 über mindestens zwei volle Fenster von 300 s. Zusätzlich aus der Prozessliste von
+    Windows gelesen (zwei Abfragen im Abstand von 30 s, nicht vom Dienst): nach 819 s Laufzeit 806 s Prozessorzeit,
+    also 0,98 Kerne im Schnitt seit dem Start; in den 30 s dazwischen 0,19 Kerne. Die Annahme „im Wesentlichen ein
+    Kern“ hinter dem Standard von 2,0 hat sich für diese Sitzung bestätigt. Die höchste Last über ein Fenster ist
+    nicht bekannt: Der Dienst notiert sie nur im Lernmodus.
+  - *Was das belegt und was nicht:* rund 25 Minuten echtes Spiel ohne Befund HOCH oder KRITISCH. Das
+    Akzeptanzkriterium aus Abschnitt 11 verlangt zwei Stunden mit Anmelden, Realmwechsel, Schlachtfeld, Raid und
+    Addons; was in den Sitzungen gespielt wurde, weiß ich nicht. `killEnabled` ist weiter aus.
+  - *Zwischendurch (16:38, 16:39):* die beiden Versuche mit dem gepatchten Client (Abschnitt 21). Der wurde vom
+    Sensor nicht überwacht, weil der nur auf den Pfad des ungepatchten Clients sieht.
