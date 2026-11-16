@@ -1482,6 +1482,29 @@ die Untersuchung in Abschnitt 18 und die Frage des Inhabers, ob es funktioniert 
   an einer **Kopie** der echten Client-Datei im Temp-Ordner (gepatchte Kopie unterscheidet sich in genau einem
   Byte an Position `0x2A7`; nach `-InPlace` und `-Undo` wieder Byte für Byte die echte Datei; der Dienst erkennt
   beide Zustände). Die echte Datei wurde dabei nur gelesen, ihr Hash ist unverändert.
-- *Nicht geprüft:* ein gepatchter Client wurde nie gestartet, also weder, ob er läuft, noch wie ein Server darauf
-  reagiert; die Abfrage „läuft der Client?“ vor `-InPlace` ist nur für die Erkennung des Prozesses geprüft, nicht
+- *Nicht geprüft (Stand beim Bau; der Versuch steht unten):* ein gepatchter Client wurde nie gestartet, also weder,
+  ob er läuft, noch wie ein Server darauf reagiert; die Abfrage „läuft der Client?“ vor `-InPlace` ist nur für die Erkennung des Prozesses geprüft, nicht
   als ganzer Ablauf; `install.ps1` mit dem neuen Hinweis ist nicht als Administrator gelaufen.
+- *Versuch des Inhabers mit der gepatchten Kopie (16.11.2026, 16:38 und 16:39): Der Client stürzt beim Anmelden ab.*
+  - *Ablauf:* `patch-client.ps1` ohne Schalter hat `WoW_patched.exe` geschrieben (nachgeprüft: genau ein Byte
+    anders, Original unverändert). Die Kopie startet und zeigt den Anmeldebildschirm. Direkt nach der Eingabe des
+    Kennworts stürzt sie ab, in zwei von zwei Versuchen (zwei Absturzberichte des Clients).
+  - *Der Absturz:* `ERROR #132`, `ACCESS_VIOLATION at 0023:00DD1000`, „The instruction at 0x00DD1000 referenced memory
+    at 0x00DD1000“. `0x00DD1000` ist die erste Adresse von `.zdata`; `EIP` und `EAX` stehen beide darauf. Windows
+    hat also verweigert, dort Code auszuführen: genau das, was der Patch verlangt.
+  - *Der Weg dorthin (Aufrufliste im Absturzbericht):* Code des Clients (im Abschnitt `.text`) ruft Code an einer
+    Adresse auf, die zu keiner Datei gehört („unknown“, zur Laufzeit geladener Code), und dieser ruft die Adresse
+    in `.zdata` auf. Im 3.3.5a-Client ist zur Laufzeit nachgeladener Code das, was der Server als Warden-Modul
+    schickt; dass es hier ein solches Modul war, ist die naheliegende Lesart, belegt ist nur die Aufrufliste.
+  - *Was das heißt:* Auf diesem Server gehört es zum normalen Anmelden, dass Code in `.zdata` ausgeführt wird. Der
+    Patch kann gewollten nicht von ungewolltem Code unterscheiden; mit diesem Server ist ein gepatchter Client
+    nicht benutzbar. `-InPlace` kommt für den Inhaber nicht in Frage. Die Annahme aus der statischen Untersuchung
+    („nichts deutet darauf, dass das Spiel dort selbst Code ausführt“) galt nur für die Datei; zur Laufzeit wird die
+    Seite benutzt.
+  - *Für RCEGuard:* Der Befund stützt den Ansatz des Konzepts (Abschnitt 1): Auf einem solchen Server lässt sich
+    der Weg, auf dem Code in den Client kommt, nicht verschließen, ohne das Anmelden zu verlieren. Beobachten lässt
+    sich nur, was dieser Code dann tut.
+  - *Nicht geklärt:* ob der Patch einen Exploit stoppt (weiter nicht prüfbar); ob der Server die zwei abgebrochenen
+    Anmeldungen bemerkt hat; wie sich andere Server verhalten.
+  - *Zu den Fragen des Inhabers:* Als Administrator starten ändert nichts, der Absturz hat nichts mit Rechten zu
+    tun. Der Client sollte ohnehin nie als Administrator laufen (Abschnitt 13, Regelidee „Client läuft mit High“).
