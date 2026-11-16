@@ -1423,3 +1423,22 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     und alles, was erst im Spiel passiert: Kampf, Schlachtfeld, Raid, Realmwechsel, wiederholte Scans, Abmelden.
     Das Akzeptanzkriterium aus Abschnitt 11 (zwei Stunden ohne Befund HOCH oder KRITISCH) ist damit offen.
   - *Der Lernmodus bleibt an.* Eine längere Sitzung braucht keine neue Installation; die Notizen werden fortgesetzt.
+- *Vorschlag aus dem kurzen Start abgeleitet (16.11.2026), auf Wunsch des Inhabers ohne längere Sitzung.*
+  - *Zwei Dateien im nicht versionierten Ordner `out\`,* beide mit `learning: false`, drei Hostnamen und einer
+    Adresse (das Realm hatte keinen Namen): `appsettings.alert-only.json` mit `killEnabled: false` und
+    `appsettings.protect.json` ohne diese Zeile. Der installierte Dienst hat beide gelesen (`--learned --config`)
+    und alle vier notierten Verbindungen als abgedeckt gezeigt. Angewendet ist keine: Die Datei im Datenordner
+    schreibt der Inhaber als Administrator.
+  - *Empfohlen ist zuerst die Datei, die nur meldet:* Beobachtet sind zweieinhalb Minuten. Ein Fehlalarm einer
+    Regel, die beendet (R1 etwa, wenn der Client einen Link im Browser öffnet), würde sonst mitten in einer Sitzung
+    das Spiel beenden. Mit `killEnabled: false` meldet der Dienst wie im Betrieb, auch unbekannte Adressen als
+    Alarm, beendet aber nichts. Nach einer normalen Sitzung ohne solche Befunde ist die zweite Datei dran.
+  - *`allowedProcessAccess` bleibt leer:* Die 36 geöffneten Programme sind, was auf dem Rechner gerade lief, also
+    kein Verhalten des Clients gegenüber bestimmten Programmen, und viele Pfade tragen Versionsnummern, die mit
+    dem nächsten Update nicht mehr stimmen. Die Liste würde nur Logeinträge einsparen (R7 MITTEL), keinen Alarm.
+  - *Der Vorschlag ist lückenhaft, mit Ansage:* Ein Server, den das Spiel erst später anspricht (ein anderes Realm),
+    wird als R2 KRITISCH gemeldet und muss dann nachgetragen werden.
+  - *Dabei aufgefallen, nicht gebaut:* (1) Die Tray-App zeigt `killEnabled: false` nicht an; ihr Schild ist dann
+    grün, obwohl nichts beendet wird, dieselbe Lücke wie zuvor beim Lernmodus. (2) Der Scan beim Start füllt die
+    Liste der Befunde mit einer Zeile je Programm. Sinnvoller wäre ein Befund je Scan („hat N Programme zum Lesen
+    geöffnet“).
