@@ -2,7 +2,8 @@
 
 > Übergabedokument für Claude Code. Zielplattform: **Windows 10/11 x64**, Client `Wow.exe` 3.3.5a (z. B. Warmane).
 > „RCEGuard“ ist der Arbeitstitel; das Konzept entstand unter dem Namen WowGuard. Umsetzungsstand und bewusste
-> Abweichungen stehen in der [`README.md`](../README.md).
+> Abweichungen stehen in der [`README.md`](../README.md) und auf den Seiten daneben ([`STATUS.md`](STATUS.md),
+> [`DETECTION.md`](DETECTION.md)).
 
 ## 1. Ziel
 

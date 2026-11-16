@@ -2,7 +2,9 @@
 
 Wächter gegen Remote Code Execution für WoW-3.3.5a-Clients auf Privatservern. Maßgeblich ist
 [`docs/KONZEPT.md`](docs/KONZEPT.md) (Regeln R1–R9, Meilensteine M1–M5); der Stand steht in der
-Tabelle „Status“ der [`README.md`](README.md) und wird mit jedem Meilenstein nachgezogen.
+Tabelle „Status“ der [`README.md`](README.md) (Kurzfassung) und im Prüfprotokoll
+[`docs/STATUS.md`](docs/STATUS.md); beides wird mit jedem Meilenstein nachgezogen. Die README bleibt kurz:
+Einzelheiten gehören auf die Themenseiten unter `docs/` (in der README unter „Documentation“ aufgelistet).
 
 ## Harte Regeln
 

@@ -18,7 +18,7 @@
          with rights to change it alerts, and a started program is terminated,
       5. puts the configuration back as it was and saves the recorded Sysmon events.
 
-    Sysmon does not record every connection (see README, "Running the guard"). The script asks
+    Sysmon does not record every connection (see docs\DETECTION.md, "Connections"). The script asks
     the Sysmon log after each connection whether it is in there and tries up to three times; what
     was not recorded is listed in the result, apart from the checks of the guard.
 
