@@ -152,6 +152,25 @@ public sealed class RenderTests
     }
 
     [Fact]
+    public void The_window_draws_the_note_about_the_client_file()
+    {
+        OnUiThread(() =>
+        {
+            using var data = new DataFolder();
+            data.ConfigureWithClientFile(zdataExecutable: true);
+            data.Add("R7", Severity.Medium, FindingAction.Log, @"The game client opened another program to read its memory (0x10): C:\Windows\explorer.exe", profile: "Warmane");
+            var viewModel = data.ViewModel();
+            viewModel.Refresh();
+
+            Render(viewModel, "window-client-note.png");
+
+            Assert.True(viewModel.HasClientNote);
+        });
+
+        Assert.True(new FileInfo(Path.Combine(Pictures, "window-client-note.png")).Length > 10_000);
+    }
+
+    [Fact]
     public void The_window_draws_when_nothing_is_installed()
     {
         OnUiThread(() =>

@@ -330,6 +330,19 @@ if (-not $SkipTray) {
     Write-Host "RCEGuard tray application installed ('$script:TrayInstallDir'). It starts for every user at sign-in and was started now: look for the shield next to the clock."
 }
 
+# A look at the client file itself; never a reason for the installation to fail.
+try {
+    . (Join-Path $PSScriptRoot 'ClientFileTools.ps1')
+    $clientFile = Get-ClientFileInfo ([IO.Path]::GetFullPath($ClientPath))
+    $writableCode = @($clientFile.WritableExecutable | ForEach-Object { $_.Name })
+    if ($writableCode.Count -gt 0) {
+        Write-Host ''
+        Write-Host "Note: the client file has a section that is both writable and executable ($($writableCode -join ', ')): code that gets written there can run." -ForegroundColor Yellow
+        Write-Host "  '.\scripts\patch-client.ps1 -ClientPath <file> -CheckOnly' says more; see `"Patching the client`" in the README. RCEGuard does not change the file." -ForegroundColor Yellow
+    }
+}
+catch { Write-Verbose "The client file could not be looked at: $($_.Exception.Message)" }
+
 if ($Learning) {
     Write-Host ''
     Write-Host 'Learning mode is ON for this client.' -ForegroundColor Yellow

@@ -20,6 +20,11 @@ if (options.NotifyTest)
     return await NotifyTestCommand.RunAsync(options, Console.Out, Console.Error);
 }
 
+if (options.CheckClient)
+{
+    return ClientCheckCommand.Run(options, Console.Out, Console.Error);
+}
+
 if (options.Learned)
 {
     return LearnedCommand.Run(options, Console.Out, Console.Error);

@@ -3,6 +3,7 @@ using System.Diagnostics.Eventing.Reader;
 using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting.WindowsServices;
+using RCEGuard.Core.Client;
 using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Learning;
 using RCEGuard.Core.Notifications;
@@ -78,6 +79,9 @@ public sealed class GuardWorker : BackgroundService
     /// Tests put a list here: what happens to run on the machine of the test must not decide them.
     /// </summary>
     internal Func<IReadOnlyList<ProcessEntry>> ListProcesses { get; init; } = ProcessSnapshot.Take;
+
+    /// <summary>Looks at a client file on disk. Tests put a made-up answer here.</summary>
+    internal Func<string, ClientFileInfo> InspectClient { get; init; } = ClientFileInspector.InspectFile;
 
     /// <summary>Reads the TCP connection table of Windows. Tests put a made-up one here.</summary>
     internal Func<IReadOnlyList<TcpConnection>> ReadConnections { get; init; } = TcpConnections.Take;
@@ -184,6 +188,17 @@ public sealed class GuardWorker : BackgroundService
         }
 
         logger.LogInformation("Configuration from {Source}; terminating processes is {State}", configSource, killEnabled ? "ON" : "OFF (dry run)");
+        if (options.ReplayPath is null)
+        {
+            foreach (var profile in config.Profiles)
+            {
+                // Only the file on disk is read. Said at every start: it stays true until the file is changed.
+                if (InspectClient(profile.ClientPath).Describe(profile.Name) is { } note)
+                {
+                    logger.LogWarning("{Note}", note);
+                }
+            }
+        }
         // Lockdown goes with terminating: where nothing is terminated, nothing is locked down either.
         lockOnKill = !config.Lockdown ? LockOnKill.Off : killEnabled ? LockOnKill.On : LockOnKill.ReportOnly;
         if (config.Lockdown)

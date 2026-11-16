@@ -31,6 +31,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private int unseen;
     private TrayState state = new(TrayKind.NotWatching, "RCEGuard", "RCEGuard", string.Empty);
     private string problem = string.Empty;
+    private string clientNote = string.Empty;
     private readonly Func<DateTimeOffset> clock;
     private readonly List<FindingRow> heldBack = [];
     private DateTimeOffset lastToast = DateTimeOffset.MinValue;
@@ -104,6 +105,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>What there is to say about the client files themselves; empty if nothing.</summary>
+    public string ClientNote
+    {
+        get => clientNote;
+        private set
+        {
+            if (clientNote != value)
+            {
+                clientNote = value;
+                Changed(nameof(ClientNote));
+                Changed(nameof(HasClientNote));
+            }
+        }
+    }
+
+    /// <summary>True if there is a note about a client file.</summary>
+    public bool HasClientNote => clientNote.Length > 0;
+
     /// <summary>True if a profile is in lockdown.</summary>
     public bool HasLockdowns => Lockdowns.Count > 0;
 
@@ -150,6 +169,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         Changed(nameof(HasLockdowns));
         Replace(Learning, [.. status.Learning.Select(profile => Describe(profile, status))]);
         Changed(nameof(HasLearning));
+        ClientNote = string.Join(Environment.NewLine, status.ClientNotes ?? []);
         State = TrayState.From(status, unseen);
     }
 

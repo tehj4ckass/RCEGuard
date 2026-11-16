@@ -35,6 +35,12 @@ public sealed record ServiceOptions
     /// <summary>The profile whose notes are shown; null means every profile.</summary>
     public string? LearnedProfile { get; init; }
 
+    /// <summary>Look at client files instead of running the guard.</summary>
+    public bool CheckClient { get; init; }
+
+    /// <summary>The file to look at; null means the client of every profile.</summary>
+    public string? CheckClientPath { get; init; }
+
     /// <summary>
     /// The event log to read. Always the Sysmon log; only tests read another one, because the
     /// Sysmon log needs administrator rights. Not a command line option.
@@ -68,6 +74,9 @@ public sealed record ServiceOptions
           --learned [profile]  show what the learning mode noted for that profile (without a name:
                                for every profile) and what it suggests for the allowlist, then
                                exit; changes nothing and needs no admin rights
+          --check-client [file]  say whether that program file (without a file: the client of
+                               every profile) has a section that is both writable and
+                               executable, then exit; only reads, needs no admin rights
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
@@ -100,6 +109,14 @@ public sealed record ServiceOptions
                     break;
                 case "--notify-test":
                     options = options with { NotifyTest = true };
+                    break;
+                case "--check-client":
+                    options = options with { CheckClient = true };
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        options = options with { CheckClientPath = Path.GetFullPath(args[++i]) };
+                    }
+
                     break;
                 case "--learned":
                     options = options with { Learned = true };

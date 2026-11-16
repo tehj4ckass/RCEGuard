@@ -8,6 +8,10 @@ Tabelle „Status“ der [`README.md`](README.md) und wird mit jedem Meilenstein
 
 - **Kein Eingriff in den Spielprozess.** Keine Injektion, keine Hooks, kein Patchen, kein Lesen des
   Prozessspeichers. Beobachtet wird nur über Betriebssystem-Mechanismen (Sysmon, Firewall, Exploit Protection).
+- **Die Client-Datei ändert nur `scripts\patch-client.ps1`,** und nur, wenn der Inhaber es selbst startet
+  (Entscheidung vom 16.11.2026, `docs/KONZEPT.md` Abschnitt 21). Dienst, Tray-App, `install.ps1` und Agenten lesen
+  die Datei höchstens (Dateikopf) und ändern sie nie; Agenten führen `patch-client.ps1` nur mit `-CheckOnly` oder
+  an Kopien außerhalb des Spielordners aus.
 - **Kein echter Exploit und kein Injektor im Repo.** Getestet wird mit dem Simulator
   `src/RCEGuard.FakeWow` (läuft als `Wow.exe`) und mit aufgezeichneten Sysmon-Events als Fixtures.
   Jedes Simulator-Szenario ist harmlos und räumt hinter sich auf.

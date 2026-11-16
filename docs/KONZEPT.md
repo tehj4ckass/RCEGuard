@@ -13,6 +13,7 @@ Eine kleine Windows-App, die den WoW-Client **von außen** überwacht. Sie melde
 ## 2. Nicht-Ziele (wichtig!)
 
 - **Kein Eingriff in `Wow.exe`**: kein DLL-Injection, kein Hooking, kein Patchen und kein Lesen des Prozessspeichers. Das würde Warden auslösen und zu einem **Ban** führen. Die App beobachtet ausschließlich über Betriebssystem-Mechanismen.
+  *Nachtrag 16.11.2026:* Gemeint sind der laufende Prozess und alles, was RCEGuard von selbst tut. Die Client-Datei kann der Inhaber mit einem eigenen Skript ändern lassen, siehe Abschnitt 21.
 - Keine Erkennung von Warden-Modulen oder Lua-Payloads im Speicher. Dynamisch geladener Code ist bei Warden normal und würde nur Fehlalarme erzeugen.
 - Kein Schutz gegen Angreifer mit Kernel- oder Admin-Rechten.
 - Kein Antivirus-Ersatz.
@@ -166,6 +167,7 @@ RCEGuard/
 - Es ist zu prüfen, ob Exploit Protection `DisallowChildProcessCreation` den Client oder Launcher stört, z. B. beim Öffnen von Links aus dem Spiel oder beim Fehlerreporter.
 - Sysmon-Events sind nachträglich, also „detect & respond“: Eine Aktion ist zum Zeitpunkt der Meldung bereits passiert. Echtes Vorab-Blocken leisten nur Firewall und Exploit Protection.
 - Optionale Ergänzung: Der Client wird mit dem stoneharry-RCEPatcher gepatcht. Das liegt außerhalb dieses Projekts, wird aber im README empfohlen.
+  *Nachtrag 16.11.2026:* Prüfung und Patch-Skript sind jetzt Teil des Projekts, siehe Abschnitt 21.
 
 ## 13. Erkenntnisse aus M1 (Sensor-Test mit dem Simulator, Sysmon 15.22)
 
@@ -1442,3 +1444,44 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     grün, obwohl nichts beendet wird, dieselbe Lücke wie zuvor beim Lernmodus. (2) Der Scan beim Start füllt die
     Liste der Befunde mit einer Zeile je Programm. Sinnvoller wäre ein Befund je Scan („hat N Programme zum Lesen
     geöffnet“).
+
+## 21. Client-Datei: Prüfung und Patch-Skript (16.11.2026)
+
+**Entscheidung des Inhabers (16.11.2026):** Prüfung und Patch-Skript werden gebaut. Das ändert zwei Stellen dieses
+Konzepts: Abschnitt 2 („kein Patchen“ von `Wow.exe`) meint ab jetzt den laufenden Prozess und alles, was RCEGuard
+von selbst tut; Abschnitt 12 hatte den Patcher als Ergänzung außerhalb des Projekts genannt. Vorausgegangen war
+die Untersuchung in Abschnitt 18 und die Frage des Inhabers, ob es funktioniert und ob es etwas kaputt machen kann.
+
+- *Was an der Client-Datei des Inhabers nachgesehen wurde (nur lesend, Build 12340):* `.zdata` ist eine Seite
+  (4096 Bytes), in der Datei vollständig leer, beschreibbar und ausführbar, an fester Adresse (kein ASLR). Das
+  Programm startet in `.text`, keine seiner Tabellen liegt in `.zdata`, und der Code verweist 23-mal auf die Seite,
+  nie als Ziel eines direkten Sprungs über einen Zeiger (nur diese Form erkennt der Suchlauf). Die Datei verlangt
+  DEP. Ihre Signatur ist schon jetzt ungültig (die Datei ist bereits verändert); der Patch ändert daran nichts.
+- *Grenze der Regel:* Den laufenden Prozess fasst weiterhin nichts an. Die Datei ändert nur
+  `scripts\patch-client.ps1`, und nur vom Inhaber gestartet; Dienst, Tray-App und `install.ps1` lesen höchstens
+  den Dateikopf. So steht es jetzt auch in `CLAUDE.md`.
+- *Prüfung (`ClientFileInspector`, Kern):* allgemein statt über die feste Position des Original-Patchers: Gibt es
+  einen Abschnitt, der beschreibbar und ausführbar ist? Gemeldet wird an vier Stellen: am Ende von `install.ps1`,
+  als Warnung im Log bei jedem Start des Dienstes, als Zeile im Fenster der Tray-App (kein eigener Zustand des
+  Symbols: es ist kein Befund, sondern ein Dauerzustand) und über `RCEGuard.Service.exe --check-client [Datei]`.
+- *Patch-Skript:* dieselbe Änderung wie der RCEPatcher (das oberste Byte der Rechte von `.zdata`, `0xE0` → `0xC0`),
+  aber mit Prüfungen davor und Rücknahme. Es ändert nur eine Datei mit genau dem bekannten Aufbau: 32-Bit, genau
+  ein beschreibbarer und ausführbarer Abschnitt, namens `.zdata`, in der Datei leer, weder Startpunkt noch Sitz
+  einer Tabelle. Ohne Schalter schreibt es eine Kopie `<Name>_patched.exe` und lässt das Original liegen;
+  `-InPlace` ändert die Datei selbst und hebt die unveränderte als `<Name>.exe.unpatched` auf; `-Undo` gibt das
+  Recht zurück (die Datei ist danach Byte für Byte die alte); `-CheckOnly` sieht nur nach. Für `-InPlace` und
+  `-Undo` darf der Client nicht laufen. Nach dem Schreiben liest es zurück und vergleicht: genau ein Byte anders,
+  sonst nimmt es die Änderung zurück.
+- *Kein Versprechen:* Das Skript und die README sagen, was geändert wird, nicht, wovor es schützt. Dass der Patch
+  den Exploit stoppt, ist die Aussage der Patcher-Autoren; geprüft ist es hier nicht und kann es nicht werden
+  (kein Exploit im Projekt).
+- *Geprüft:* 9 Tests im Kern (Erkennen, gepatchte Datei, abgeschnittene und kaputte Köpfe, Lesen ohne Ändern, eine
+  echte Programmdatei), 8 im Dienst (Befehl, Warnung beim Start), 3 in der Tray-App samt Bild; alle Suiten grün
+  (285, 115, 37). Trockenlauf des Skripts in PowerShell 7 und 5.1, 26 Prüfungen: an nachgebauten Dateien (Kopie,
+  an Ort und Stelle, Rücknahme, sechs Arten von Dateien, die es liegen lassen muss, Textdatei, fehlende Datei) und
+  an einer **Kopie** der echten Client-Datei im Temp-Ordner (gepatchte Kopie unterscheidet sich in genau einem
+  Byte an Position `0x2A7`; nach `-InPlace` und `-Undo` wieder Byte für Byte die echte Datei; der Dienst erkennt
+  beide Zustände). Die echte Datei wurde dabei nur gelesen, ihr Hash ist unverändert.
+- *Nicht geprüft:* ein gepatchter Client wurde nie gestartet, also weder, ob er läuft, noch wie ein Server darauf
+  reagiert; die Abfrage „läuft der Client?“ vor `-InPlace` ist nur für die Erkennung des Prozesses geprüft, nicht
+  als ganzer Ablauf; `install.ps1` mit dem neuen Hinweis ist nicht als Administrator gelaufen.

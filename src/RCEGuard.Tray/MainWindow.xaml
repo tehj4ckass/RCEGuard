@@ -59,6 +59,12 @@
             </StackPanel>
         </Border>
 
+        <!-- What the client file itself has to say: not a finding, a standing fact. -->
+        <Border DockPanel.Dock="Top" Padding="16,8" Background="#FFF8E1" BorderBrush="#F9A825" BorderThickness="0,0,0,1"
+                Visibility="{Binding HasClientNote, Converter={StaticResource Visible}}">
+            <TextBlock Text="{Binding ClientNote}" TextWrapping="Wrap" Foreground="#5D4037" />
+        </Border>
+
         <DockPanel DockPanel.Dock="Bottom" Margin="16,8">
             <Button DockPanel.Dock="Right" Content="Open data folder" Padding="12,3" Click="OnOpenFolderClick" />
             <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#555555">

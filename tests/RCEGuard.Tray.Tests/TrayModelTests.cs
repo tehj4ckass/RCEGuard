@@ -48,6 +48,47 @@ internal sealed class DataFolder : IDisposable
         System.IO.Path.Combine(Path, "appsettings.json"),
         $$"""{"cpuAlertCores": 2.0, "profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe" {{profileSettings}} }]}""");
 
+    /// <summary>The headers of a 32-bit program laid out like the 3.3.5a client's; the fourth section is ".zdata".</summary>
+    public static byte[] ClientFile(bool zdataExecutable)
+    {
+        var file = new byte[4096];
+        file[0] = (byte)'M';
+        file[1] = (byte)'Z';
+        const int pe = 0x110;
+        BitConverter.GetBytes(pe).CopyTo(file, 0x3C);
+        file[pe] = (byte)'P';
+        file[pe + 1] = (byte)'E';
+        (string Name, uint Flags)[] sections =
+        [
+            (".text", 0x60000020), (".rdata", 0x40000040), (".data", 0xC0000040),
+            (".zdata", zdataExecutable ? 0xE0000040 : 0xC0000040), (".tls", 0xC0000040), (".rsrc", 0x40000040),
+        ];
+        BitConverter.GetBytes((ushort)sections.Length).CopyTo(file, pe + 6);
+        BitConverter.GetBytes((ushort)0xE0).CopyTo(file, pe + 20);
+        for (var i = 0; i < sections.Length; i++)
+        {
+            var at = pe + 24 + 0xE0 + (i * 40);
+            System.Text.Encoding.ASCII.GetBytes(sections[i].Name).CopyTo(file, at);
+            BitConverter.GetBytes(sections[i].Flags).CopyTo(file, at + 36);
+        }
+
+        return file;
+    }
+
+    /// <summary>
+    /// A configuration whose client is a file in this folder with the headers of the 3.3.5a client;
+    /// returns its path. <paramref name="zdataExecutable"/>: the section ".zdata" is writable and executable.
+    /// </summary>
+    public string ConfigureWithClientFile(bool zdataExecutable)
+    {
+        var client = System.IO.Path.Combine(Path, "Wow.exe");
+        File.WriteAllBytes(client, DataFolder.ClientFile(zdataExecutable));
+        File.WriteAllText(
+            System.IO.Path.Combine(Path, "appsettings.json"),
+            $$"""{"profiles":[{"name":"Warmane","clientPath":"{{client.Replace("\\", "\\\\")}}"}]}""");
+        return client;
+    }
+
     /// <summary>Notes of the learning mode as the service saves them.</summary>
     public void Learn(params LearnedProfile[] notes) =>
         new LearnedFile(System.IO.Path.Combine(Path, LearnedFile.FileName)).Save(notes);
@@ -262,6 +303,42 @@ public sealed class TrayModelTests : IDisposable
         Assert.Empty(viewModel.Learning);
         Assert.False(viewModel.HasLearning);
         Assert.Equal(TrayKind.Watching, viewModel.State.Kind);
+    }
+
+    [Fact]
+    public void A_client_file_with_a_writable_and_executable_section_is_noted_until_it_is_changed()
+    {
+        var client = data.ConfigureWithClientFile(zdataExecutable: true);
+        var viewModel = data.ViewModel();
+        viewModel.Refresh();
+
+        Assert.True(viewModel.HasClientNote);
+        Assert.Equal(
+            "The client of 'Warmane' has a section that is both writable and executable (.zdata): code that gets written there can run. See \"Patching the client\" in the README.",
+            viewModel.ClientNote);
+        // Not an alarm: the icon stays as it is.
+        Assert.Equal(TrayKind.Watching, viewModel.State.Kind);
+
+        // The file was changed (as the patch does): the next look says nothing any more.
+        var patched = DataFolder.ClientFile(zdataExecutable: false);
+        File.WriteAllBytes(client, patched);
+        File.SetLastWriteTimeUtc(client, DateTime.UtcNow.AddSeconds(5));
+        viewModel.Refresh();
+
+        Assert.False(viewModel.HasClientNote);
+        Assert.Equal(string.Empty, viewModel.ClientNote);
+    }
+
+    [Fact]
+    public void A_client_file_that_is_missing_or_fine_gives_no_note()
+    {
+        var viewModel = data.ViewModel();   // the client of the installation does not exist on this machine
+        viewModel.Refresh();
+        Assert.False(viewModel.HasClientNote);
+
+        data.ConfigureWithClientFile(zdataExecutable: false);
+        viewModel.Refresh();
+        Assert.False(viewModel.HasClientNote);
     }
 
     [Fact]
