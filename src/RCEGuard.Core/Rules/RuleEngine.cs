@@ -568,6 +568,7 @@ public sealed class RuleEngine
                 Image = image,
                 ProcessId = e.GetInt("SourceProcessId"),
                 Target = target,
+                Detail = access,
                 Time = e.TimeCreated,
                 RecordId = e.RecordId,
             },

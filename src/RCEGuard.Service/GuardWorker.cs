@@ -34,6 +34,12 @@ public sealed class GuardWorker : BackgroundService
     /// <summary>How often a quiet guard looks whether the log holds events it was not given.</summary>
     private static readonly TimeSpan DeliveryCheckInterval = TimeSpan.FromSeconds(15);
 
+    /// <summary>A scan counts as over when the client has opened no further program for this long.</summary>
+    private static readonly TimeSpan ScanQuiet = TimeSpan.FromSeconds(3);
+
+    /// <summary>A scan that does not end is reported after this long anyway.</summary>
+    private static readonly TimeSpan ScanLongest = TimeSpan.FromSeconds(60);
+
     /// <summary>What the learning mode noted is saved at most this often.</summary>
     private static readonly TimeSpan LearnedSaveInterval = TimeSpan.FromSeconds(5);
 
@@ -68,6 +74,9 @@ public sealed class GuardWorker : BackgroundService
     private bool cpuReadFailed;
     private ConnectionWatch? connectionWatch;
     private bool connectionReadFailed;
+
+    // A scan (the client opens every running program to read it) becomes one finding instead of one per program.
+    private readonly ScanBundler scans = new(ScanQuiet, ScanLongest);
 
     /// <summary>Opens the notifier for an ntfy topic. Tests put one here that sends nothing over the network.</summary>
     internal Func<NtfyConfig, Action<LogLevel, string>, INotifier> OpenNotifier { get; init; } =
@@ -219,6 +228,11 @@ public sealed class GuardWorker : BackgroundService
         if (options.ReplayPath is not null)
         {
             Replay(options.ReplayPath, engine, store);
+            foreach (var finding in scans.FlushAll())
+            {
+                Report(finding, killer: null, store, late: false);
+            }
+
             SaveLearned(force: true);
             lifetime.StopApplication();
             return;
@@ -291,11 +305,26 @@ public sealed class GuardWorker : BackgroundService
                 }
 
                 PollClients(engine, killer, store);
+                foreach (var finding in scans.Flush(DateTimeOffset.UtcNow))
+                {
+                    Report(finding, killer, store, late: finding.RecordId <= newestAtStart);
+                }
 
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 var waitFor = unsaved is null ? idleWait : PositionSaveInterval;
                 // While a client runs, the loop must come round often enough to measure it.
-                wait.CancelAfter(clients.Count > 0 && clientPollInterval < waitFor ? clientPollInterval : waitFor);
+                if (clients.Count > 0 && clientPollInterval < waitFor)
+                {
+                    waitFor = clientPollInterval;
+                }
+
+                // A scan that is held back must not wait for the next event to be reported.
+                if (scans.HasPending && waitFor > TimeSpan.FromSeconds(1))
+                {
+                    waitFor = TimeSpan.FromSeconds(1);
+                }
+
+                wait.CancelAfter(waitFor);
                 LogEntry entry;
                 try
                 {
@@ -346,6 +375,12 @@ public sealed class GuardWorker : BackgroundService
         }
         finally
         {
+            // What is still held back when the guard stops is reported, not dropped.
+            foreach (var finding in scans.FlushAll())
+            {
+                Report(finding, killer, store, late: false);
+            }
+
             SavePosition(positionFile, ref unsaved, sinceSave);
             SaveLearned(force: true);
         }
@@ -520,9 +555,12 @@ public sealed class GuardWorker : BackgroundService
         TrackConnection(sysmonEvent!);
         foreach (var finding in findings)
         {
-            if (Report(finding, killer, store, late))
+            foreach (var ready in scans.Add(finding, DateTimeOffset.UtcNow))
             {
-                reported++;
+                if (Report(ready, killer, store, late))
+                {
+                    reported++;
+                }
             }
         }
 

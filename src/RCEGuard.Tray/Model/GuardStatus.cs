@@ -30,6 +30,7 @@ internal enum ServiceState
 /// <param name="ToastEnabled">Whether new findings are shown as a pop-up.</param>
 /// <param name="Learned">What the learning mode noted, per profile; empty if there is nothing or it cannot be read.</param>
 /// <param name="CpuAlertCores">The processor load above which R8 reports (0: the rule is off).</param>
+/// <param name="KillEnabled">False if the configuration says that nothing is terminated ("killEnabled": false).</param>
 internal sealed record GuardStatus(
     ServiceState Service,
     IReadOnlyList<ClientProfile> Profiles,
@@ -38,7 +39,8 @@ internal sealed record GuardStatus(
     string? LockdownProblem,
     bool ToastEnabled,
     IReadOnlyList<LearnedProfile>? Learned = null,
-    double CpuAlertCores = 0)
+    double CpuAlertCores = 0,
+    bool KillEnabled = true)
 {
     /// <summary>The profiles in learning mode: their clients are watched, not protected.</summary>
     public IReadOnlyList<ClientProfile> Learning => [.. Profiles.Where(profile => profile.Learning)];
@@ -66,12 +68,14 @@ internal sealed class StatusReader
         string? configProblem = null;
         var toast = true;
         var cpuAlertCores = 0.0;
+        var killEnabled = true;
         try
         {
             var config = GuardConfigFile.Load(dataDirectory, explicitPath: null, out _);
             profiles = config.Profiles;
             toast = config.Notify?.Toast ?? true;
             cpuAlertCores = config.CpuAlertCores;
+            killEnabled = config.KillEnabled;
         }
         catch (FileNotFoundException)
         {
@@ -85,7 +89,7 @@ internal sealed class StatusReader
         var locked = new LockdownFile(Path.Combine(dataDirectory, LockdownFile.FileName)).Load(out var lockdownProblem);
         // Notes that cannot be read are no notes: they are only shown.
         var learned = new LearnedFile(Path.Combine(dataDirectory, LearnedFile.FileName)).Load(out _);
-        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores);
+        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores, killEnabled);
     }
 
     private static ServiceState QueryService()
@@ -123,6 +127,9 @@ internal enum TrayKind
     /// <summary>A profile is in learning mode: its client is watched, but nothing is terminated or blocked for it.</summary>
     Learning,
 
+    /// <summary>The configuration turns terminating off: findings are reported, nothing is acted on.</summary>
+    ReportOnly,
+
     /// <summary>The service is not running: the client is not watched.</summary>
     NotWatching,
 }
@@ -136,7 +143,8 @@ internal sealed record TrayState(TrayKind Kind, string Tooltip, string Headline,
 {
     /// <summary>
     /// Works the state out. What counts most comes first: a guard that is not running, then a
-    /// lockdown, then findings nobody has looked at, then a client that is only watched (learning mode).
+    /// lockdown, then findings nobody has looked at, then a guard that only reports (terminating is
+    /// turned off, or a profile is in learning mode).
     /// </summary>
     public static TrayState From(GuardStatus status, int unseen)
     {
@@ -182,8 +190,22 @@ internal sealed record TrayState(TrayKind Kind, string Tooltip, string Headline,
         if (unseen > 0)
         {
             var findings = unseen == 1 ? "1 new finding" : $"{unseen} new findings";
-            var note = learning.Count == 0 ? string.Empty : $" Learning mode is on for {learningNames}: nothing is terminated or blocked there.";
+            var note = !status.KillEnabled
+                ? " Report only: nothing is terminated, whatever is found."
+                : learning.Count == 0 ? string.Empty : $" Learning mode is on for {learningNames}: nothing is terminated or blocked there.";
             return new TrayState(TrayKind.Alert, Limit($"RCEGuard: {findings}"), findings, $"RCEGuard is watching {clients}." + note);
+        }
+
+        if (!status.KillEnabled)
+        {
+            // Said first and plainly, like learning mode: the guard watches and reports, it does not step in.
+            var alsoLearning = learning.Count == 0 ? string.Empty : $" Learning mode is on for {learningNames} as well.";
+            return new TrayState(
+                TrayKind.ReportOnly,
+                "RCEGuard: report only, nothing is terminated",
+                $"Report only: {clients} {(status.Profiles.Count > 1 ? "are" : "is")} watched, nothing is terminated",
+                "\"killEnabled\" is false in the configuration: findings are reported, but no client is terminated and no profile is locked down. " +
+                "Set it to true in appsettings.json and restart the service to change that." + alsoLearning);
         }
 
         if (learning.Count > 0)

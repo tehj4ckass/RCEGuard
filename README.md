@@ -201,6 +201,14 @@ What the rules do:
 | R9 | miner-like command line in a child of the client | critical | terminate child and client |
 | R9 | miner-like command line in an unrelated process | critical | alert only: a string match is no reason to kill a process that is not tied to the client |
 
+**A scan is one finding.** Right after its start the real client opens every running program to
+read its memory (seen: 36 programs within a second). The guard holds the R7 findings that are
+only logged back until the client has opened nothing more for 3 seconds (60 at most) and then
+reports them together: "The game client opened 36 other programs to read their memory (0x10;
+100 accesses within 1 s): chrome.exe, ... and 31 more". A single access is reported as before,
+only those few seconds later. An access with rights to change a program (R7 high) is never held
+back.
+
 A process is only terminated if its pid still runs the program the event named. Findings go to
 `findings.db` (SQLite) in the data folder. "Alert" currently means a line in the console; the
 notification itself comes with the tray app in M4, because a service cannot show toasts.
@@ -354,10 +362,13 @@ at it without installing anything:
 | orange shield with an exclamation mark | findings that alerted or terminated and that you have not looked at; opening the window marks them as seen |
 | red shield with a bar | a profile is in lockdown |
 | blue shield with a ring | a profile is in learning mode: its client is watched, but nothing is terminated or blocked for it |
+| blue shield with two bars | report only: `"killEnabled": false` in the configuration, so findings are reported, but no client is terminated and no profile is locked down |
 | grey shield with a cross | the service is not running or not installed: the client is not watched |
 
 What counts most is shown: a service that is down before a lockdown, a lockdown before new
-findings, new findings before learning mode. A double click opens the window: the state, the
+findings, new findings before "report only", that before learning mode. (The tray application
+reads `killEnabled` from the configuration; a service started by hand with `--dry-run` does not
+terminate either, and that it cannot see.) A double click opens the window: the state, the
 profiles in lockdown with the finding that caused each, the profiles in learning mode, and the
 newest 200 findings (those that were only logged are grey). Closing
 the window leaves the icon; "Exit" in the menu of the icon ends the tray application, not the

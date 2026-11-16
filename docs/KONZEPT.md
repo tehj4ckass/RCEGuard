@@ -1444,6 +1444,30 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
     grün, obwohl nichts beendet wird, dieselbe Lücke wie zuvor beim Lernmodus. (2) Der Scan beim Start füllt die
     Liste der Befunde mit einer Zeile je Programm. Sinnvoller wäre ein Befund je Scan („hat N Programme zum Lesen
     geöffnet“).
+- *Beide Lücken geschlossen (16.11.2026).*
+  - *Ein Befund je Scan (`ScanBundler` im Kern):* R7-Befunde, die nur geloggt werden, hält der Dienst je Client
+    zurück, bis 3 s lang kein weiterer dazukam (höchstens 60 s), und meldet sie dann als einen: Zahl der Programme,
+    Zahl der Zugriffe, die angefragten Rechte, die ersten fünf Dateinamen und „and N more“. Schweregrad MITTEL,
+    sobald ein Zugriff zum Lesen dabei war, sonst Info. Ein einzelner Zugriff wird unverändert gemeldet, nur diese
+    Sekunden später. R7 HOCH (Rechte zum Verändern) und alle anderen Regeln gehen sofort durch.
+  - *Zwei Uhren:* Die Zeiten der Ereignisse trennen zwei Scans (auch in einer abgespielten Datei); wann ein
+    zurückgehaltener Scan gemeldet wird, richtet sich nach dem Eintreffen. Sonst wären Ereignisse, die der Dienst
+    nach einem Neustart nachliest, einzeln gemeldet worden, weil sie schon älter als 3 s sind. Beim Beenden des
+    Dienstes und am Ende einer abgespielten Datei wird gemeldet, was noch zurückgehalten ist.
+  - *Folge für den Vorschlag des Lernmodus:* keine. Der Lerner sieht weiterhin jeden einzelnen Zugriff.
+  - *Grenze:* Die Position im Sysmon-Log wird weiter nach Zeit gespeichert. Stürzt der Dienst ab, während er einen
+    Scan zurückhält, kann dessen Logeintrag fehlen. Das betrifft nur Befunde, die ohnehin nur geloggt werden.
+  - *Tray-App, „nur melden“ (`TrayKind.ReportOnly`):* blaues Schild mit zwei Balken, Überschrift „Report only: …
+    is watched, nothing is terminated“, darunter der Hinweis auf `killEnabled` in `appsettings.json`. Reihenfolge:
+    Dienst läuft nicht, Sperre, neue Befunde (mit dem Zusatz, dass nichts beendet wird), nur melden, Lernmodus,
+    alles ruhig. Die App liest die Einstellung aus der Konfiguration; einen von Hand mit `--dry-run` gestarteten
+    Dienst erkennt sie nicht.
+  - *Geprüft:* Kern 294, Dienst 116, Tray 38 Tests grün, darunter der Scan in der Wächterschleife (12 Zugriffe, eine
+    Zeile, nicht vor Ablauf der Ruhezeit), ein Alarm mitten im Scan und das Beenden mit zurückgehaltenem Scan;
+    Bilder der sechs Symbole und des Fensters angesehen; `learning-test.ps1` im Trockenlauf mit Stellvertretern in
+    PowerShell 7 und 5.1 (die Wartezeit auf die R7-Zeile ist dort verlängert).
+  - *Nicht geprüft:* am installierten Dienst und mit dem echten Client. Der installierte Dienst ist noch der Stand
+    vom 15.11.2026; den neuen bekommt er mit dem nächsten Lauf von `install.ps1`.
 
 ## 21. Client-Datei: Prüfung und Patch-Skript (16.11.2026)
 

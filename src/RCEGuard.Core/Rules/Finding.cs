@@ -70,6 +70,9 @@ public sealed record Finding
     /// <summary>Command line, for process events.</summary>
     public string CommandLine { get; init; } = string.Empty;
 
+    /// <summary>One more value of the event where a rule needs it: for R7 the access rights asked for (e.g. 0x1410).</summary>
+    public string Detail { get; init; } = string.Empty;
+
     /// <summary>Processes to terminate when <see cref="Action"/> is <see cref="FindingAction.Kill"/>.</summary>
     public IReadOnlyList<KillTarget> KillTargets { get; init; } = [];
 

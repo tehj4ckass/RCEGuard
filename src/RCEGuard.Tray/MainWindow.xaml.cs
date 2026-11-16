@@ -32,6 +32,7 @@ internal partial class MainWindow : Window
         TrayKind.Alert => (0xEF, 0x6C, 0x00),
         TrayKind.Locked => (0xC6, 0x28, 0x28),
         TrayKind.Learning => (0x15, 0x65, 0xC0),
+        TrayKind.ReportOnly => (0x15, 0x65, 0xC0),
         _ => (0x75, 0x75, 0x75),
     };
 

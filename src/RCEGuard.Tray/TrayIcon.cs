@@ -89,7 +89,7 @@ internal sealed class TrayIcon : IDisposable
             using var outline = new Drawing.Pen(Drawing.Color.FromArgb(230, 255, 255, 255), 1.5f);
             graphics.DrawPath(outline, path);
 
-            // What the state means, readable without colour: tick, exclamation mark, bar, ring, cross.
+            // What the state means, readable without colour: tick, exclamation mark, bar, ring, pause, cross.
             using var mark = new Drawing.Pen(Drawing.Color.White, 3.2f)
             {
                 StartCap = Drawing.Drawing2D.LineCap.Round,
@@ -111,6 +111,11 @@ internal sealed class TrayIcon : IDisposable
                 case TrayKind.Learning:
                     // An open ring: looking, not holding.
                     graphics.DrawEllipse(mark, 10.5f, 9, 11, 11);
+                    break;
+                case TrayKind.ReportOnly:
+                    // Two bars: stepping in is paused.
+                    graphics.DrawLine(mark, 12.5f, 9.5f, 12.5f, 20);
+                    graphics.DrawLine(mark, 19.5f, 9.5f, 19.5f, 20);
                     break;
                 default:
                     graphics.DrawLine(mark, 11, 10, 21, 20);

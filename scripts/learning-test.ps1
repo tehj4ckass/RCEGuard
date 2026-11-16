@@ -318,7 +318,8 @@ try {
     Write-Host '   The client opens another program (to read it, then with rights to change it) ...'
     $null = Invoke-Client @('--open-process', 'read')
     $null = Invoke-Client @('--open-process', 'write')
-    $read = @(Wait-NewLines $learningStart "R7 MEDIUM $tag .*to read its memory \(0x1010\)" 8)
+    # The guard holds an access for reading back for a few seconds: a burst of them (a scan) becomes one finding.
+    $read = @(Wait-NewLines $learningStart "R7 MEDIUM $tag .*to read its memory \(0x1010[;)]" 20)
     $write = @(Wait-NewLines $learningStart "R7 HIGH $tag .*with rights to change it \(0x102a" 8)
     Add-Check '1' 'R7: reading is a log entry, rights to change it are an alert' ($read.Count -gt 0 -and $write.Count -gt 0) "$($read.Count) medium, $($write.Count) high"
 

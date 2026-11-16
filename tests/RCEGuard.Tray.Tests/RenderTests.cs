@@ -152,6 +152,29 @@ public sealed class RenderTests
     }
 
     [Fact]
+    public void The_window_draws_a_guard_that_only_reports_with_a_scan_as_one_finding()
+    {
+        OnUiThread(() =>
+        {
+            using var data = new DataFolder();
+            File.WriteAllText(Path.Combine(data.Path, "appsettings.json"), """{"killEnabled":false,"profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe"}]}""");
+            data.Add(
+                "R7", Severity.Medium, FindingAction.Log,
+                "The game client opened 36 other programs to read their memory (0x10; 100 accesses within 1 s): chrome.exe, Discord.exe, explorer.exe, svchost.exe, conhost.exe and 31 more",
+                profile: "Warmane");
+            data.Add("R4", Severity.Info, FindingAction.Log, @"The game client wrote a key below Services: HKLM\System\CurrentControlSet\Services\Tcpip\Parameters", profile: "Warmane");
+            var viewModel = data.ViewModel();
+            viewModel.Refresh();
+
+            Render(viewModel, "window-report-only.png");
+
+            Assert.Equal(TrayKind.ReportOnly, viewModel.State.Kind);
+        });
+
+        Assert.True(new FileInfo(Path.Combine(Pictures, "window-report-only.png")).Length > 10_000);
+    }
+
+    [Fact]
     public void The_window_draws_when_nothing_is_installed()
     {
         OnUiThread(() =>

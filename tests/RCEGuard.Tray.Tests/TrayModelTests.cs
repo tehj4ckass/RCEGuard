@@ -264,6 +264,51 @@ public sealed class TrayModelTests : IDisposable
         Assert.Equal(TrayKind.Watching, viewModel.State.Kind);
     }
 
+    private static GuardStatus ReportOnlyStatus(ServiceState service = ServiceState.Running, int locked = 0, int learning = 0, int profiles = 1) =>
+        LearningStatus(service, locked, learning, profiles) with { KillEnabled = false };
+
+    [Fact]
+    public void A_guard_that_only_reports_is_not_shown_as_all_quiet()
+    {
+        var state = TrayState.From(ReportOnlyStatus(), 0);
+
+        Assert.Equal((TrayKind.ReportOnly, "Report only: 'Client1' is watched, nothing is terminated"), (state.Kind, state.Headline));
+        Assert.Equal("RCEGuard: report only, nothing is terminated", state.Tooltip);
+        Assert.Contains("\"killEnabled\" is false", state.Detail);
+        Assert.Contains("no client is terminated and no profile is locked down", state.Detail);
+        Assert.DoesNotContain("Learning", state.Detail);
+
+        Assert.Equal("Report only: 2 clients are watched, nothing is terminated", TrayState.From(ReportOnlyStatus(profiles: 2), 0).Headline);
+        // Both at once: report only is the wider statement, learning is mentioned.
+        var both = TrayState.From(ReportOnlyStatus(learning: 1), 0);
+        Assert.Equal(TrayKind.ReportOnly, both.Kind);
+        Assert.EndsWith("Learning mode is on for 'Client1' as well.", both.Detail);
+    }
+
+    [Fact]
+    public void Report_only_counts_less_than_new_findings_a_lockdown_or_a_guard_that_is_down()
+    {
+        var findings = TrayState.From(ReportOnlyStatus(), 3);
+        Assert.Equal((TrayKind.Alert, "3 new findings"), (findings.Kind, findings.Headline));
+        Assert.EndsWith("Report only: nothing is terminated, whatever is found.", findings.Detail);
+
+        Assert.Equal(TrayKind.Locked, TrayState.From(ReportOnlyStatus(locked: 1), 0).Kind);
+        Assert.Equal(TrayKind.NotWatching, TrayState.From(ReportOnlyStatus(ServiceState.Stopped), 0).Kind);
+    }
+
+    [Fact]
+    public void The_status_reads_from_the_configuration_whether_anything_is_terminated()
+    {
+        Assert.True(new StatusReader(data.Path, () => ServiceState.Running).Read().KillEnabled);   // the default, also without a configuration file
+
+        File.WriteAllText(Path.Combine(data.Path, "appsettings.json"), """{"killEnabled":false,"profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe"}]}""");
+        var viewModel = data.ViewModel();
+        viewModel.Refresh();
+
+        Assert.False(new StatusReader(data.Path, () => ServiceState.Running).Read().KillEnabled);
+        Assert.Equal((TrayKind.ReportOnly, "Report only: 'Warmane' is watched, nothing is terminated"), (viewModel.State.Kind, viewModel.State.Headline));
+    }
+
     [Fact]
     public void Several_clients_and_an_unreadable_lockdown_state_are_named_as_such()
     {
