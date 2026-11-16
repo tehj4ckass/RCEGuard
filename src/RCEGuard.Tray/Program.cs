@@ -69,7 +69,14 @@ internal static class Program
             }
         }
 
-        using var tray = new TrayIcon(Open, OpenFolder, () =>
+        // The question about a mode belongs to the window: it is brought up first, so the question is not left behind other windows.
+        void SetMode(Core.Configuration.GuardMode mode)
+        {
+            Open();
+            window.RequestMode(mode);
+        }
+
+        using var tray = new TrayIcon(Open, OpenFolder, SetMode, () =>
         {
             window.Exiting = true;
             window.Close();
@@ -82,12 +89,17 @@ internal static class Program
             {
                 tray.Show(viewModel.State);
             }
+            else if (e.PropertyName is nameof(MainViewModel.Mode) or nameof(MainViewModel.CanSetMode))
+            {
+                tray.ShowMode(viewModel.Mode, viewModel.CanSetMode);
+            }
         };
 
         void Refresh() => viewModel.Refresh(windowIsOpen: window.IsVisible && window.IsActive);
 
         Refresh();
         tray.Show(viewModel.State);
+        tray.ShowMode(viewModel.Mode, viewModel.CanSetMode);
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         timer.Tick += (_, _) => Refresh();
         timer.Start();

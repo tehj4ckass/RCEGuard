@@ -24,8 +24,7 @@ public sealed class GuardWorkerResumeTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
+        TestFolder.Delete(folder);
     }
 
     private LogPositionFile PositionFile => new(Path.Combine(folder, ServiceOptions.PositionFileName));

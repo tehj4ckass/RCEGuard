@@ -9,6 +9,17 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
         </Style>
+        <!-- The three modes: buttons of which one stays pressed. -->
+        <Style x:Key="ModeButton" TargetType="RadioButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+            <Setter Property="GroupName" Value="GuardMode" />
+            <Setter Property="Padding" Value="14,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <!-- The state at a glance: the same colour as the icon in the notification area. -->
@@ -17,6 +28,23 @@
                 <TextBlock Text="{Binding State.Headline}" Foreground="White" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding State.Detail}" Foreground="White" Margin="0,4,0,0" TextWrapping="Wrap" />
             </StackPanel>
+        </Border>
+
+        <!-- How strictly the guard acts. A click asks, then starts a command of the service as administrator. -->
+        <Border DockPanel.Dock="Top" Padding="16,8" Background="#F5F5F5" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Left" Text="Mode" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" IsEnabled="{Binding CanSetMode}">
+                    <RadioButton x:Name="ModeProtect" Style="{StaticResource ModeButton}" Content="Protect" Click="OnModeClick"
+                                 ToolTip="Findings are reported, and the critical ones terminate the client." />
+                    <RadioButton x:Name="ModeReportOnly" Style="{StaticResource ModeButton}" Content="Report only" Click="OnModeClick"
+                                 ToolTip="Findings are reported as in normal operation, but nothing is terminated and nothing is locked down." />
+                    <RadioButton x:Name="ModeLearning" Style="{StaticResource ModeButton}" Content="Learning" Click="OnModeClick"
+                                 ToolTip="The client is watched, not protected: connections are noted instead of judged, and nothing is terminated or blocked." />
+                </StackPanel>
+                <TextBlock Text="{Binding ModeHint}" ToolTip="{Binding ModeHint}" VerticalAlignment="Center" Margin="8,0,0,0"
+                           Foreground="#555555" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
         </Border>
 
         <!-- Profiles in lockdown, each with the finding that caused it and the way out. -->
@@ -62,14 +90,14 @@
         <DockPanel DockPanel.Dock="Bottom" Margin="16,8">
             <Button DockPanel.Dock="Right" Content="Open data folder" Padding="12,3" Click="OnOpenFolderClick" />
             <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#555555">
-                <Run Text="Findings and log of the guard service: " /><Run Text="{Binding DataDirectory, Mode=OneWay}" />
+                <Run Text="Double-click a finding for all of it.   Findings and log of the guard service: " /><Run Text="{Binding DataDirectory, Mode=OneWay}" />
             </TextBlock>
         </DockPanel>
 
         <TextBlock x:Name="ProblemText" DockPanel.Dock="Bottom" Margin="16,8,16,0" Foreground="#C62828" TextWrapping="Wrap"
                    Text="{Binding Problem}" />
 
-        <ListView x:Name="FindingList" Margin="16,12,16,0" ItemsSource="{Binding Findings}"
+        <ListView x:Name="FindingList" Margin="16,12,16,0" ItemsSource="{Binding Findings}" MouseDoubleClick="OnFindingDoubleClick"
                   ScrollViewer.HorizontalScrollBarVisibility="Auto">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">

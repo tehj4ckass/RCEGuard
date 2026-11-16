@@ -36,6 +36,29 @@ newest 200 findings (those that were only logged are grey). Closing
 the window leaves the icon; "Exit" in the menu of the icon ends the tray application, not the
 service.
 
+- **Mode.** The bar below the state has three buttons, and the menu of the icon has the same
+  three under "Mode": "Protect" (findings are reported, and the critical ones terminate the
+  client), "Report only" (everything is judged and reported, nothing is terminated or locked
+  down) and "Learning" (every profile learns: watched, not protected). The one that is set
+  stays pressed; none is pressed if the configuration is neither (learning for some profiles
+  only, or learning together with `"killEnabled": false`). A click asks first and then starts
+  `RCEGuard.Service.exe --set-mode <mode>` with administrator rights: Windows asks for an
+  administrator. The command changes `killEnabled` and `learning` in `appsettings.json`, keeps
+  the file from before as `appsettings.json.bak`, restarts the service and, if an ntfy topic is
+  configured, reports the change there. A mode is set for every profile.
+- **A finding in full.** A double click on a finding shows all of it as text (the columns of the
+  list cut long lines), with "Copy".
+- **Allowing an address.** For a finding about a connection (R2) that window has "Allow this
+  address ...". It starts `RCEGuard.Service.exe --allow <profile> <address>` the same way:
+  the address is added to `allowedRemote` of the profile and the service is restarted. Do this
+  only for an address you recognise as a server of your game: connections to it are not
+  reported any more. The finding itself stays in the list.
+- **A restart while the game runs.** Changing the mode or the allowlist restarts the service.
+  It finds the running client again (it keeps a list of the clients it knows to be running) and
+  goes on measuring its processor load and reading its connections; the average for R8 starts
+  anew, and connections that are open at that moment are listed once in the log as "found in
+  the connection table". If an ntfy topic is configured, "RCEGuard is stopping while the client
+  runs" is sent as well.
 - **Pop-ups.** A new finding that alerted or terminated is shown as a Windows notification;
   several at once as one, naming the most serious. There is at most one pop-up in ten seconds:
   what arrives in between is announced together afterwards, while the icon and the list are up

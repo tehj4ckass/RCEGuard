@@ -79,6 +79,12 @@ public static class NotificationText
             $"RCEGuard is being stopped while {string.Join(", ", clients)} is running. The client is not watched from now on.\n{computer}",
             NotificationPriority.Urgent);
 
+    /// <summary>The configuration of the guard was changed through one of its own commands (the mode, the allowlist).</summary>
+    /// <param name="what">What was changed, as the command printed it.</param>
+    /// <param name="computer">Name of this machine.</param>
+    public static Notification ConfigChanged(string what, string computer) =>
+        new("RCEGuard: configuration changed", $"{what}\n{computer}", NotificationPriority.High);
+
     /// <summary>A notification the owner asked for, to see that notifications arrive.</summary>
     public static Notification Test(string computer) =>
         new("RCEGuard: test notification", $"If you can read this, notifications of RCEGuard reach you.\n{computer}", NotificationPriority.Default);

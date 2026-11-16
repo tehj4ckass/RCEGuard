@@ -30,6 +30,16 @@ if (options.Learned)
     return LearnedCommand.Run(options, Console.Out, Console.Error);
 }
 
+if (options.SetMode is not null)
+{
+    return await ConfigCommand.SetModeAsync(options, Console.Out, Console.Error);
+}
+
+if (options.AllowProfile is not null)
+{
+    return await ConfigCommand.AllowAsync(options, Console.Out, Console.Error);
+}
+
 if (options.Release)
 {
     return await ReleaseCommand.RunAsync(options, new WindowsFirewall(), Console.Out, Console.Error);

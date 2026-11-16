@@ -84,7 +84,8 @@ public sealed class RenderTests
             data.Add("R1", Severity.Medium, FindingAction.Log, "Windows attached a console to the game client (conhost.exe)");
             data.Add("R2", Severity.Critical, FindingAction.Alert, "The game client connected to an address that is not on the allowlist: 203.0.113.9:443");
             data.Add("R5", Severity.High, FindingAction.Alert, @"The game client loaded an unsigned module from a user folder: C:\Users\player\AppData\Local\Temp\helper.dll");
-            var repeated = data.Add("R2", Severity.Critical, FindingAction.Alert, "The game client connected to an address that is not on the allowlist: 198.51.100.20:8085");
+            var repeated = data.Add(
+                "R2", Severity.Critical, FindingAction.Alert, "The game client connected to an address that is not on the allowlist: 198.51.100.20:8085", target: "198.51.100.20:8085");
             using (var store = new RCEGuard.Service.FindingStore(data.Database))
             {
                 store.AddRepeat(repeated, DateTimeOffset.UtcNow);
@@ -99,7 +100,12 @@ public sealed class RenderTests
             viewModel.Refresh();
 
             Render(viewModel, "window-locked.png");
+            var finding = viewModel.Findings.First(row => row.Rule == "R2");
+            var view = new MainWindow(viewModel).FindingView(finding);
+            Render((FrameworkElement)view.Content, "window-finding.png", new Size(760, 340));
 
+            Assert.Equal("198.51.100.20", finding.AllowableAddress);
+            Assert.Contains("finding R2", view.Title);
             Assert.Equal(6, viewModel.Findings.Count);
         });
 

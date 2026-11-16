@@ -137,8 +137,9 @@ The details, with what was measured, are in [docs/DETECTION.md](docs/DETECTION.m
 - Sysmon does not record every connection (in the measurements about three of four). The
   service finds a missed connection in the connection table of Windows once it has been open
   for 5 seconds; a shorter one depends on Sysmon alone.
-- A client that was already running when the service started is watched by Sysmon, but its
+- A client that was already running when RCEGuard was installed is watched by Sysmon, but its
   processor time and its connections in the table are not looked at until it is started again.
+  (Across a restart of its service the guard keeps track of a running client.)
 - Sysmon reports the programs the client starts, not what those start. The guard looks for
   what an exited child left behind, with limits.
 - A connection that the firewall rule blocks is not reported.
@@ -196,16 +197,15 @@ taken over automatically, and not everything in the notes is harmless: whatever 
 while learning is in there.
 
 **5. Take over what you recognise.** Put it into `C:\ProgramData\RCEGuard\appsettings.json`
-(as administrator), set `"learning": false`, and restart the service:
-
-```powershell
-Restart-Service RCEGuard
-```
+(as administrator). Then leave learning mode: click "Report only" or "Protect" under "Mode" in
+the window of the tray application, or in the menu of its icon. Windows asks for an
+administrator, and the service is restarted with the new configuration.
 
 > [!TIP]
-> A cautious step in between: add `"killEnabled": false` at the top of the configuration. The
-> guard then judges and alerts as in normal operation but terminates nothing (blue shield with
-> two bars). After a normal session without a false alarm, take the line out again.
+> "Report only" is a cautious step in between: the guard judges and alerts as in normal
+> operation but terminates nothing (blue shield with two bars). After a normal session without
+> a false alarm, switch to "Protect". If the guard then reports a server you know (another
+> realm, for example), double-click the finding and choose "Allow this address ...".
 
 More on this in [docs/LEARNING.md](docs/LEARNING.md); what the scripts do to the machine in
 [docs/INSTALL.md](docs/INSTALL.md).
@@ -260,6 +260,24 @@ Everything except `name` and `clientPath` is optional; the values shown are the 
 Without a configuration file the client the sensor was installed for is the only profile, with
 an empty allowlist: every connection of the client is then an R2 alert.
 
+Two things can be changed without opening the file, from the tray application or in a console
+started as administrator. Both keep the file from before as `appsettings.json.bak` and restart
+the service:
+
+```powershell
+& 'C:\Program Files\RCEGuard\RCEGuard.Service.exe' --set-mode report-only
+```
+
+sets the mode (`protect`, `report-only`, `learning`): `killEnabled` at the top and `learning` on
+every profile. And
+
+```powershell
+& 'C:\Program Files\RCEGuard\RCEGuard.Service.exe' --allow Warmane 203.0.113.9
+```
+
+adds an address or a range to `allowedRemote` of a profile. Comments in the file do not survive
+such a change.
+
 ## Tray application
 
 | Icon | Meaning |
@@ -271,10 +289,19 @@ an empty allowlist: every connection of the client is then an R2 alert.
 | blue shield with two bars | report only: `"killEnabled": false` in the configuration, so findings are reported, but no client is terminated and no profile is locked down |
 | grey shield with a cross | the service is not running or not installed: the client is not watched |
 
-A double click opens the window with the state, the newest 200 findings, the profiles in
-lockdown (with a "Release ..." button that asks Windows for an administrator) and what learning
-mode noted. The application runs as the logged-on user, needs no administrator rights and only
-reads what the service stores. Details: [docs/TRAY.md](docs/TRAY.md).
+A double click on the icon opens the window:
+
+- **Mode.** Three buttons, also in the menu of the icon: "Protect" (findings are reported, the
+  critical ones terminate the client), "Report only" (nothing is terminated or locked down) and
+  "Learning" (watched, not protected).
+- **Findings.** The newest 200. A double click on one shows all of it, to read and to copy. For
+  a connection to an unknown address there is "Allow this address ...", which puts it on the
+  allowlist of the profile.
+- **Lockdowns** with a "Release ..." button, and what learning mode noted.
+
+The application runs as the logged-on user and changes nothing itself. Whatever changes the
+guard (mode, allowlist, release) is a command of the installed service that Windows asks an
+administrator to confirm; the service is restarted for it. Details: [docs/TRAY.md](docs/TRAY.md).
 
 ## Blocking in advance (optional)
 

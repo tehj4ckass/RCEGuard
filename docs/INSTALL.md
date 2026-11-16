@@ -55,6 +55,8 @@ Windows service is running: two guards would both act on every event):
 | `--data-dir <folder>` | data folder, default `C:\ProgramData\RCEGuard` |
 | `--replay <file>` | evaluate a saved events file instead of the live log, then exit; never terminates anything, needs no admin rights |
 | `--release [profile]` | end the lockdown of that profile (without a name: of every profile), then exit; see [PREVENTION.md](PREVENTION.md) |
+| `--set-mode <mode>` | set how the guard acts (`protect`, `report-only`, `learning`): changes `killEnabled` and, on every profile, `learning` in the configuration, keeps the file from before as `appsettings.json.bak`, restarts the service, then exit; the tray application starts it for its mode buttons; see [TRAY.md](TRAY.md) |
+| `--allow <profile> <address>` | add an IP address or CIDR range to `allowedRemote` of that profile, keep the file from before, restart the service, then exit; the tray application starts it for "Allow this address ..." |
 | `--notify-test` | send a test notification to the configured ntfy topic, then exit; needs no admin rights; see [NOTIFICATIONS.md](NOTIFICATIONS.md) |
 | `--check-client [file]` | say whether that program file (without a file: the client of every profile) has a section that is both writable and executable, then exit; only reads the file, needs no admin rights; see [CLIENT-PATCH.md](CLIENT-PATCH.md) |
 | `--learned [profile]` | show what the learning mode noted for that profile (without a name: for every profile) and what it suggests for the allowlist, then exit; changes nothing, needs no admin rights; see [LEARNING.md](LEARNING.md) |

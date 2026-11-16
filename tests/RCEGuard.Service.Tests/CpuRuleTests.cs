@@ -21,8 +21,7 @@ public sealed class CpuRuleTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
+        TestFolder.Delete(folder);
     }
 
     private static string ClientEvent(int id) =>

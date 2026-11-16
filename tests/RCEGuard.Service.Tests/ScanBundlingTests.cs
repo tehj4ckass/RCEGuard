@@ -21,8 +21,7 @@ public sealed class ScanBundlingTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
+        TestFolder.Delete(folder);
     }
 
     private static string Access(string target, string rights, DateTimeOffset time) =>

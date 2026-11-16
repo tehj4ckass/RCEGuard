@@ -58,8 +58,7 @@ public sealed class NotifierTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
+        TestFolder.Delete(folder);
     }
 
     private NtfyNotifier Notifier(string? token = "tk_example") =>

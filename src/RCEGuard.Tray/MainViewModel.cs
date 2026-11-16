@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Microsoft.Data.Sqlite;
+using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Learning;
 using RCEGuard.Core.State;
 using RCEGuard.Tray.Model;
@@ -31,6 +32,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private int unseen;
     private TrayState state = new(TrayKind.NotWatching, "RCEGuard", "RCEGuard", string.Empty);
     private string problem = string.Empty;
+    private GuardMode? mode;
+    private bool canSetMode;
     private readonly Func<DateTimeOffset> clock;
     private readonly List<FindingRow> heldBack = [];
     private DateTimeOffset lastToast = DateTimeOffset.MinValue;
@@ -104,6 +107,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>The mode the configuration amounts to; null if it is none of the three or cannot be read.</summary>
+    public GuardMode? Mode => mode;
+
+    /// <summary>False if the configuration cannot be read: there is nothing a mode could be set in.</summary>
+    public bool CanSetMode => canSetMode;
+
+    /// <summary>One line next to the mode buttons: what the mode of now means.</summary>
+    public string ModeHint => !canSetMode
+        ? "The configuration cannot be read, so the mode is not known."
+        : mode is { } current
+            ? GuardModes.Describe(current)
+            : "Mixed: learning is on for some profiles only, or together with \"killEnabled\": false. Choosing a mode sets it for every profile.";
+
     /// <summary>True if a profile is in lockdown.</summary>
     public bool HasLockdowns => Lockdowns.Count > 0;
 
@@ -150,11 +166,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         Changed(nameof(HasLockdowns));
         Replace(Learning, [.. status.Learning.Select(profile => Describe(profile, status))]);
         Changed(nameof(HasLearning));
+        var readable = status.ConfigProblem is null;
+        if (mode != status.Mode || canSetMode != readable)
+        {
+            mode = status.Mode;
+            canSetMode = readable;
+            Changed(nameof(Mode));
+            Changed(nameof(CanSetMode));
+            Changed(nameof(ModeHint));
+        }
+
         State = TrayState.From(status, unseen);
     }
 
     /// <summary>The line and the full text for a profile in learning mode.</summary>
-    private static LearningLine Describe(Core.Configuration.ClientProfile profile, GuardStatus status)
+    private static LearningLine Describe(ClientProfile profile, GuardStatus status)
     {
         var notes = status.Learned?.FirstOrDefault(learned => string.Equals(learned.Profile, profile.Name, StringComparison.OrdinalIgnoreCase));
         if (notes is null)

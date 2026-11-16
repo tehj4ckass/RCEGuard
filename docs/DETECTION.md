@@ -124,8 +124,10 @@ client is not opened for this). A connection of the client that has been in the 
 learns it exactly like a recorded one. Sysmon gets those 5 seconds because it writes its event
 up to 3 seconds late; a connection it did record is not reported a second time. What remains:
 a connection that is closed again within about 5 to 7 seconds is only seen if Sysmon records
-it, and a client that was already running when the service started is not looked at until it
-is started again. The firewall rule of a profile depends on neither source. Measured on the
+it, and a client that was already running when RCEGuard was installed is not looked at until
+it is started again. The guard keeps the list of running clients across a restart of its service (`clients.json` in the data folder), so a restart of the service (an update, a
+change of the mode) does not lose a running game; whether a listed process still runs is
+checked against its start time. The firewall rule of a profile depends on neither source. Measured on the
 installed service on 2026-11-15: Sysmon recorded 7 of 10 connections that stayed open, the guard
 saw 10 of 10. The service is not the cause: it reported every connection event
 Sysmon wrote (25 of 25). Sysmon is known to name the program of a connection as
@@ -149,6 +151,8 @@ terminated.
 - Whether the client is in the foreground is not part of the rule (the concept asked for
   "in the background"): the service runs outside the user's session and cannot see that.
 - The service knows which processes are clients from their start in the Sysmon log. A client
-  that was already running when the service started is not measured until it is started again.
+  that was already running when RCEGuard was installed is not measured until it is started
+  again. After a restart of the service a running client is measured again; the average
+  starts anew.
 - On a machine with no more cores than `cpuAlertCores` the rule can never report; the service
   says so in its log.

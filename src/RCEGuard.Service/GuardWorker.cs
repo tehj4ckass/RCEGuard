@@ -74,6 +74,7 @@ public sealed class GuardWorker : BackgroundService
     private bool cpuReadFailed;
     private ConnectionWatch? connectionWatch;
     private bool connectionReadFailed;
+    private bool clientsSaveFailed;
 
     // A scan (the client opens every running program to read it) becomes one finding instead of one per program.
     private readonly ScanBundler scans = new(ScanQuiet, ScanLongest);
@@ -219,6 +220,7 @@ public sealed class GuardWorker : BackgroundService
         {
             watchClients = true;
             connectionWatch = new ConnectionWatch(ConnectionGrace);
+            LoadClients();
             clientPollInterval = cpuWatch is not null && cpuPollInterval < ConnectionPollInterval ? cpuPollInterval : ConnectionPollInterval;
             logger.LogInformation(
                 "Connections of a running client are also read from the connection table of Windows: one that Sysmon did not record is found there once it has been open for {Grace} s",
@@ -587,6 +589,7 @@ public sealed class GuardWorker : BackgroundService
             if (clients.Remove(pid, out var ended))
             {
                 Forget(pid, ended);
+                SaveClients();
             }
         }
         else if (clients.Count < 256 || clients.ContainsKey(pid))
@@ -594,6 +597,72 @@ public sealed class GuardWorker : BackgroundService
             // An old event (read after a restart) may name a process that is long gone: the start
             // time lets the look at the process list tell it from whatever has that pid now.
             clients[pid] = new WatchedClient(profile.Name, image, RuleEngine.ProcessStart(e));
+            SaveClients();
+        }
+    }
+
+    /// <summary>
+    /// Takes up the clients that were running when the guard stopped. Their start is behind the
+    /// position in the Sysmon log, so without this a restart of the guard (a change of its
+    /// configuration, an update) would leave a running game unlooked at until it is started again.
+    /// Whether they still run is found out by the first look at the process list.
+    /// </summary>
+    private void LoadClients()
+    {
+        var path = Path.Combine(options.DataDirectory, ServiceOptions.ClientsFileName);
+        try
+        {
+            if (!File.Exists(path) || loadedConfig is null)
+            {
+                return;
+            }
+
+            var saved = System.Text.Json.JsonSerializer.Deserialize<List<SavedClient>>(File.ReadAllText(path)) ?? [];
+            foreach (var client in saved.Take(256))
+            {
+                // Only what the configuration of now still watches, under the name it has now.
+                var profile = loadedConfig.Profiles.FirstOrDefault(candidate => PathRules.Same(candidate.ClientPath, client.Image));
+                if (profile is not null && client.Pid > 0)
+                {
+                    clients[client.Pid] = new WatchedClient(profile.Name, client.Image, client.Started);
+                }
+            }
+
+            if (clients.Count > 0)
+            {
+                logger.LogInformation(
+                    "{Count} client(s) that ran when the guard stopped are looked at again if they still run (processor load, connections)", clients.Count);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            logger.LogWarning("The list of running clients '{Path}' could not be read ({Reason}); a client that is running now is looked at after its next start", path, ex.Message);
+        }
+    }
+
+    private void SaveClients()
+    {
+        var path = Path.Combine(options.DataDirectory, ServiceOptions.ClientsFileName);
+        try
+        {
+            if (clients.Count == 0)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(clients.Select(entry => new SavedClient(entry.Key, entry.Value.Image, entry.Value.Started))));
+            }
+
+            clientsSaveFailed = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (!clientsSaveFailed)
+            {
+                clientsSaveFailed = true;
+                logger.LogWarning("The list of running clients '{Path}' could not be written ({Reason}); after a restart of the guard a running client is looked at only after its next start", path, ex.Message);
+            }
         }
     }
 
@@ -652,6 +721,7 @@ public sealed class GuardWorker : BackgroundService
             return;
         }
 
+        var gone = false;
         foreach (var (pid, client) in clients.ToList())
         {
             // Gone, or the pid belongs to another process by now.
@@ -659,7 +729,13 @@ public sealed class GuardWorker : BackgroundService
             {
                 clients.Remove(pid);
                 Forget(pid, client);
+                gone = true;
             }
+        }
+
+        if (gone)
+        {
+            SaveClients();
         }
 
         if (clients.Count == 0)
@@ -958,3 +1034,9 @@ public sealed class LogDeliveryException : Exception
     {
     }
 }
+
+/// <summary>A running client as it is kept in the data folder across a restart of the guard.</summary>
+/// <param name="Pid">Process id.</param>
+/// <param name="Image">Full path of the program.</param>
+/// <param name="Started">When the process was started; tells it from another process with the same pid.</param>
+internal sealed record SavedClient(int Pid, string Image, DateTimeOffset Started);

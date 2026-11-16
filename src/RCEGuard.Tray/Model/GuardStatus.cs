@@ -31,6 +31,7 @@ internal enum ServiceState
 /// <param name="Learned">What the learning mode noted, per profile; empty if there is nothing or it cannot be read.</param>
 /// <param name="CpuAlertCores">The processor load above which R8 reports (0: the rule is off).</param>
 /// <param name="KillEnabled">False if the configuration says that nothing is terminated ("killEnabled": false).</param>
+/// <param name="Mode">The mode the configuration amounts to; null if it is none of the three or cannot be read.</param>
 internal sealed record GuardStatus(
     ServiceState Service,
     IReadOnlyList<ClientProfile> Profiles,
@@ -40,7 +41,8 @@ internal sealed record GuardStatus(
     bool ToastEnabled,
     IReadOnlyList<LearnedProfile>? Learned = null,
     double CpuAlertCores = 0,
-    bool KillEnabled = true)
+    bool KillEnabled = true,
+    GuardMode? Mode = null)
 {
     /// <summary>The profiles in learning mode: their clients are watched, not protected.</summary>
     public IReadOnlyList<ClientProfile> Learning => [.. Profiles.Where(profile => profile.Learning)];
@@ -69,6 +71,7 @@ internal sealed class StatusReader
         var toast = true;
         var cpuAlertCores = 0.0;
         var killEnabled = true;
+        GuardMode? mode = null;
         try
         {
             var config = GuardConfigFile.Load(dataDirectory, explicitPath: null, out _);
@@ -76,6 +79,7 @@ internal sealed class StatusReader
             toast = config.Notify?.Toast ?? true;
             cpuAlertCores = config.CpuAlertCores;
             killEnabled = config.KillEnabled;
+            mode = GuardModes.Of(config);
         }
         catch (FileNotFoundException)
         {
@@ -89,7 +93,7 @@ internal sealed class StatusReader
         var locked = new LockdownFile(Path.Combine(dataDirectory, LockdownFile.FileName)).Load(out var lockdownProblem);
         // Notes that cannot be read are no notes: they are only shown.
         var learned = new LearnedFile(Path.Combine(dataDirectory, LearnedFile.FileName)).Load(out _);
-        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores, killEnabled);
+        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores, killEnabled, mode);
     }
 
     private static ServiceState QueryService()
@@ -205,7 +209,7 @@ internal sealed record TrayState(TrayKind Kind, string Tooltip, string Headline,
                 "RCEGuard: report only, nothing is terminated",
                 $"Report only: {clients} {(status.Profiles.Count > 1 ? "are" : "is")} watched, nothing is terminated",
                 "\"killEnabled\" is false in the configuration: findings are reported, but no client is terminated and no profile is locked down. " +
-                "Set it to true in appsettings.json and restart the service to change that." + alsoLearning);
+                "Choose another mode below to change that." + alsoLearning);
         }
 
         if (learning.Count > 0)
@@ -216,7 +220,7 @@ internal sealed record TrayState(TrayKind Kind, string Tooltip, string Headline,
                 Limit($"RCEGuard: learning mode for {learningNames} (not protected)"),
                 $"Learning mode: {learningNames} {(learning.Count == 1 ? "is" : "are")} watched, not protected",
                 "For a client in learning mode nothing is terminated, locked down or blocked; what it does is noted. " +
-                "Turn it off in appsettings.json (\"learning\": false) and restart the service when you are done.");
+                "Choose another mode below when you are done.");
         }
 
         var problem = status.ConfigProblem is null ? string.Empty : $" The configuration cannot be read here: {status.ConfigProblem}";

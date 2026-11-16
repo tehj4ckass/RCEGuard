@@ -1557,3 +1557,41 @@ die Untersuchung in Abschnitt 18 und die Frage des Inhabers, ob es funktioniert 
     Addons; was in den Sitzungen gespielt wurde, weiß ich nicht. `killEnabled` ist weiter aus.
   - *Zwischendurch (16:38, 16:39):* die beiden Versuche mit dem gepatchten Client (Abschnitt 21). Der wurde vom
     Sensor nicht überwacht, weil der nur auf den Pfad des ungepatchten Clients sieht.
+
+## 22. Modus wählen, Befund lesen, Adresse erlauben (16.11.2026)
+
+Auftrag des Inhabers: die Modi über das Menü des Tray-Symbols und im Fenster wählbar machen, dazu, was sonst sinnvoll
+und benutzerfreundlich ist.
+
+- *Drei Modi statt zweier Einstellungen (`GuardMode` im Kern):* „Protect“ (`killEnabled: true`, kein Profil lernt),
+  „Report only“ (`killEnabled: false`, kein Profil lernt), „Learning“ (alle Profile lernen, `killEnabled: true`).
+  Alles andere (nur manche Profile lernen; Lernen zusammen mit `killEnabled: false`) ist keiner der drei: Dann ist
+  kein Knopf gedrückt, und die Zeile daneben sagt es. Ein Modus gilt für alle Profile; je Profil bleibt die Datei.
+- *Die Tray-App ändert weiterhin nichts selbst.* Wie bei „Release ...“ startet sie einen Befehl des installierten
+  Dienstes mit Administratorfrage: `--set-mode <protect|report-only|learning>` und `--allow <Profil> <Adresse>`.
+  Könnte sie es ohne Frage, könnte jedes Programm unter dem Benutzer den Wächter auf „nur melden“ stellen.
+- *Was die Befehle tun (`ConfigCommand`, `GuardConfigEditor`):* Sie ändern in `appsettings.json` nur die betroffenen
+  Einstellungen (auch bei anderer Groß-/Kleinschreibung des Namens), lassen Unbekanntes stehen, prüfen das Ergebnis
+  als Konfiguration, legen die Datei von vorher als `appsettings.json.bak` ab, schreiben über eine Nachbardatei und
+  starten den Dienst neu. Ohne Konfigurationsdatei wird sie aus dem installierten Client geschrieben. Ist nichts zu
+  ändern, wird nichts geschrieben und nichts neu gestartet. Kommentare in der Datei gehen verloren.
+- *Meldung nach außen:* Ist ntfy eingerichtet, meldet der Befehl die Änderung dorthin („configuration changed“),
+  damit ein Wechsel auf „nur melden“ nicht unbemerkt bleibt. Gegen jemanden mit Administratorrechten hilft das nicht.
+- *Neustart bei laufendem Spiel:* Der Dienst merkt sich die laufenden Clients in `clients.json` und nimmt sie nach
+  dem Neustart wieder auf (geprüft über Startzeit und Pfad). Vorher hätte jeder Moduswechsel und jede erlaubte
+  Adresse die Messung der Prozessorlast und den Blick in die Verbindungstabelle bis zum nächsten Spielstart beendet.
+  Der Mittelwert für R8 beginnt neu; offene Verbindungen stehen einmal als „found in the connection table“ im Log.
+- *Befund ganz lesen:* Doppelklick auf einen Befund zeigt ihn als Text mit „Copy“. Die Spalten der Liste schneiden
+  lange Zeilen ab, das fiel bei der Scan-Zeile besonders auf.
+- *Adresse erlauben:* Nur an R2-Befunden, nur für eine gültige IP-Adresse (nichts anderes gelangt auf die
+  Befehlszeile, die als Administrator läuft), mit Rückfrage und dem Hinweis, das nur für erkannte Server zu tun.
+- *Nicht gebaut:* den Vorschlag des Lernmodus mit einem Klick übernehmen. In den Notizen steht alles, was der Client
+  getan hat; das bräuchte eine Liste zum Abhaken und ist zurückgestellt.
+- *Geprüft:* Kern 307, Dienst 129, Tray 41 Tests grün; der veröffentlichte Dienst hat die Befehle an einer
+  Konfiguration in einem Temp-Ordner ausgeführt; Fensterbilder (Modusleiste, Befundfenster) angesehen.
+- *Nicht geprüft:* die Befehle als Administrator am installierten Dienst (echter Neustart), die Administratorfrage
+  aus der Tray-App, das Menü des Symbols (lässt sich nicht in ein Bild zeichnen), das Wiederaufnehmen eines echten
+  laufenden Clients nach einem Neustart.
+- *Am Rand:* Ein vorhandener Dienst-Test scheiterte einmal beim Aufräumen an einer noch geöffneten `findings.db`
+  (in drei weiteren Läufen nicht). Vermutung, nicht belegt: Die Testklassen laufen nebeneinander und leeren alle den
+  Verbindungspool von SQLite. Das Löschen des Testordners wird jetzt kurz wiederholt (`TestFolder.Delete`).

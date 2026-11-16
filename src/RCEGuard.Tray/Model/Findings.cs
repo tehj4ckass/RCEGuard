@@ -22,6 +22,36 @@ internal sealed record FindingRow(
     /// <summary>"+3" if the finding repeated within the repeat window, otherwise empty.</summary>
     public string RepeatsText => Repeats > 0 ? $"+{Repeats}" : string.Empty;
 
+    /// <summary>
+    /// For a finding about a connection (R2): the address the client connected to, which can be put
+    /// on the allowlist of the profile. Null for every other finding.
+    /// </summary>
+    public string? AllowableAddress
+    {
+        get
+        {
+            // The target of R2 is "address:port", for IPv6 "[address]:port".
+            var cut = Target.LastIndexOf(':');
+            if (!string.Equals(Rule, "R2", StringComparison.OrdinalIgnoreCase) || Profile.Length == 0 || cut <= 0)
+            {
+                return null;
+            }
+
+            return System.Net.IPAddress.TryParse(Target[..cut].Trim('[', ']'), out var address) ? address.ToString() : null;
+        }
+    }
+
+    /// <summary>Everything about the finding as text, to read in full and to copy.</summary>
+    public string DetailText =>
+        $"Time:                {TimeText}\n" +
+        $"Rule:                {Rule}\n" +
+        $"Severity:            {SeverityText}\n" +
+        $"Profile:             {Profile}\n" +
+        $"What the guard did:  {ActionText}\n" +
+        (Repeats > 0 ? $"Seen again:          {Repeats} more time(s) within the repeat window\n" : string.Empty) +
+        $"Target:              {Target}\n\n" +
+        $"What happened:\n{Summary}";
+
     /// <summary>How serious the finding is, for sorting: 3 critical ... 0 info.</summary>
     public int Rank => Severity.ToUpperInvariant() switch { "CRITICAL" => 3, "HIGH" => 2, "MEDIUM" => 1, _ => 0 };
 }

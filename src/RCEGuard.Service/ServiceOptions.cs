@@ -41,6 +41,15 @@ public sealed record ServiceOptions
     /// <summary>The file to look at; null means the client of every profile.</summary>
     public string? CheckClientPath { get; init; }
 
+    /// <summary>Set the mode of the guard (protect, report-only, learning) instead of running it; null: not asked for.</summary>
+    public string? SetMode { get; init; }
+
+    /// <summary>Add an address to the allowlist of this profile instead of running the guard; null: not asked for.</summary>
+    public string? AllowProfile { get; init; }
+
+    /// <summary>The address or range to add for <see cref="AllowProfile"/>.</summary>
+    public string? AllowAddress { get; init; }
+
     /// <summary>
     /// The event log to read. Always the Sysmon log; only tests read another one, because the
     /// Sysmon log needs administrator rights. Not a command line option.
@@ -52,6 +61,9 @@ public sealed record ServiceOptions
 
     /// <summary>Name of the file in the data folder that holds the position of the last handled event.</summary>
     public const string PositionFileName = "sysmon-position.json";
+
+    /// <summary>Name of the file in the data folder that lists the clients the guard knows to be running.</summary>
+    public const string ClientsFileName = "clients.json";
 
     /// <summary>Name of the file in the data folder that is there while the guard runs.</summary>
     public const string RunningMarkerName = "guard-running";
@@ -77,6 +89,16 @@ public sealed record ServiceOptions
           --check-client [file]  say whether that program file (without a file: the client of
                                every profile) has a section that is both writable and
                                executable, then exit; only reads, needs no admin rights
+          --set-mode <mode>    set how the guard acts, keep the configuration from before as
+                               appsettings.json.bak and restart the guard service, then exit.
+                               Modes: protect (findings are reported, critical ones terminate the
+                               client), report-only (nothing is terminated or locked down),
+                               learning (every profile learns: watched, not protected).
+                               Run it in a console started as administrator
+          --allow <profile> <address>
+                               add an IP address or CIDR range to the allowed addresses of that
+                               profile, keep the configuration from before and restart the guard
+                               service, then exit; run it in a console started as administrator
           --help               show this text
 
         The live guard writes its log to <data-dir>\guard.log and its findings to <data-dir>\findings.db.
@@ -109,6 +131,12 @@ public sealed record ServiceOptions
                     break;
                 case "--notify-test":
                     options = options with { NotifyTest = true };
+                    break;
+                case "--set-mode" when i + 1 < args.Length:
+                    options = options with { SetMode = args[++i] };
+                    break;
+                case "--allow" when i + 2 < args.Length:
+                    options = options with { AllowProfile = args[++i], AllowAddress = args[++i] };
                     break;
                 case "--check-client":
                     options = options with { CheckClient = true };

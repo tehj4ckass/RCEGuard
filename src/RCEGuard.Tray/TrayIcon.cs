@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using RCEGuard.Core.Configuration;
 using RCEGuard.Tray.Model;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -13,12 +14,15 @@ internal sealed class TrayIcon : IDisposable
 {
     private readonly Forms.NotifyIcon icon;
     private readonly Dictionary<TrayKind, Drawing.Icon> icons = [];
+    private readonly Dictionary<GuardMode, Forms.ToolStripMenuItem> modeItems = [];
+    private readonly Forms.ToolStripMenuItem modeMenu = new("Mode");
 
     /// <summary>Creates the icon.</summary>
     /// <param name="open">Called when the user wants the window.</param>
     /// <param name="openFolder">Called when the user wants the data folder.</param>
+    /// <param name="setMode">Called when the user picks a mode in the menu.</param>
     /// <param name="exit">Called when the user ends the tray application.</param>
-    public TrayIcon(Action open, Action openFolder, Action exit)
+    public TrayIcon(Action open, Action openFolder, Action<GuardMode> setMode, Action exit)
     {
         foreach (var kind in Enum.GetValues<TrayKind>())
         {
@@ -30,6 +34,15 @@ internal sealed class TrayIcon : IDisposable
         openItem.Font = new Drawing.Font(openItem.Font, Drawing.FontStyle.Bold);
         menu.Items.Add(openItem);
         menu.Items.Add(new Forms.ToolStripMenuItem("Open data folder", null, (_, _) => openFolder()));
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        foreach (var mode in Enum.GetValues<GuardMode>())
+        {
+            var item = new Forms.ToolStripMenuItem(ModeLabel(mode), null, (_, _) => setMode(mode));
+            modeItems[mode] = item;
+            modeMenu.DropDownItems.Add(item);
+        }
+
+        menu.Items.Add(modeMenu);
         menu.Items.Add(new Forms.ToolStripSeparator());
         // Ending this application ends the pop-ups, not the guard: the service keeps running.
         menu.Items.Add(new Forms.ToolStripMenuItem("Exit (the guard service keeps running)", null, (_, _) => exit()));
@@ -51,6 +64,27 @@ internal sealed class TrayIcon : IDisposable
         icon.Icon = icons[state.Kind];
         // Windows takes at most 127 characters here.
         icon.Text = state.Tooltip.Length <= 127 ? state.Tooltip : state.Tooltip[..127];
+    }
+
+    /// <summary>What the menu calls a mode: its name and, for the two that take protection away, what that means.</summary>
+    internal static string ModeLabel(GuardMode mode) => mode switch
+    {
+        GuardMode.ReportOnly => "Report only (nothing is terminated)",
+        GuardMode.Learning => "Learning (watched, not protected)",
+        _ => "Protect",
+    };
+
+    /// <summary>Ticks the mode that is set in the menu.</summary>
+    /// <param name="mode">The mode; null if the configuration is none of the three.</param>
+    /// <param name="canSet">False if there is no configuration a mode could be set in.</param>
+    public void ShowMode(GuardMode? mode, bool canSet)
+    {
+        modeMenu.Enabled = canSet;
+        modeMenu.Text = mode is { } current ? $"Mode: {GuardModes.Name(current)}" : "Mode";
+        foreach (var (candidate, item) in modeItems)
+        {
+            item.Checked = candidate == mode;
+        }
     }
 
     /// <summary>Shows a pop-up. Windows 10 and 11 show it as a notification and keep it in the notification centre.</summary>

@@ -8,7 +8,7 @@ Nobody knows yet which servers the client
 talks to, which programs it opens and how much processor time it takes, and a rule that fires
 on something the client does on purpose would end the game. So:
 
-1. Close the game. (A client that is already running when the service starts is watched by
+1. Close the game. (A client that is already running when RCEGuard is installed is watched by
    Sysmon, but its processor load and the connections Sysmon misses are not looked at.)
 2. In an administrator PowerShell:
 
@@ -25,9 +25,11 @@ on something the client does on purpose would end the game. So:
 4. Afterwards look at what was noted: "What was learned ..." in the window of the tray
    application, or `RCEGuard.Service.exe --learned`. Also look at the findings of the session:
    everything that alerted is something the rules would have acted on.
-5. Put what you recognise into `appsettings.json` (as administrator), set `"learning": false`
-   and run `Restart-Service RCEGuard`. From then on the guard terminates and, if turned on,
-   blocks. See "What learning mode does" below.
+5. Put what you recognise into `appsettings.json` (as administrator). Then leave learning
+   mode: click "Report only" or "Protect" under "Mode" in the window of the tray application
+   (Windows asks for an administrator; the service is restarted and reads the file anew). By
+   hand it is `"learning": false` and `Restart-Service RCEGuard`. From "Protect" on the guard
+   terminates and, if turned on, blocks. See "What learning mode does" below.
 
 What the notes and the log of such a session hold are the addresses of the servers you play on
 and paths with your Windows user name: keep them out of bug reports and repositories.
@@ -35,11 +37,13 @@ and paths with your Windows user name: keep them out of bug reports and reposito
 ### A step in between: report only
 
 Learning mode notes and does not judge connections. Before the guard is allowed to end the game,
-it can run with the learned allowlist and `"killEnabled": false` (at the top level of
-`appsettings.json`): every rule judges as in normal operation, an unknown address is an alert
+it can run with the learned allowlist in the mode "Report only" (`"killEnabled": false` at the
+top level of `appsettings.json`): every rule judges as in normal operation, an unknown address is an alert
 again, but nothing is terminated and nothing is locked down. The shield of the tray application
 is then blue with two bars. After a normal session without an alert that should not have been
-one, take the line out (or set it to `true`) and restart the service.
+one, switch to "Protect". A server the guard did not know yet (another realm, for example)
+shows up as an R2 alert: double-click the finding and choose "Allow this address ..." if you
+recognise it.
 
 ## What learning mode does
 

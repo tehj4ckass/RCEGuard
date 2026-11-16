@@ -55,8 +55,7 @@ public sealed class LockdownTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
+        TestFolder.Delete(folder);
     }
 
     private LockdownFile Lockdown => new(Path.Combine(folder, LockdownFile.FileName));

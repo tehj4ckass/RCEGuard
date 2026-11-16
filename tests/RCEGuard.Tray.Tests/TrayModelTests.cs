@@ -23,7 +23,7 @@ internal sealed class DataFolder : IDisposable
 
     public string SeenPath => System.IO.Path.Combine(Path, "user", "tray-state.txt");
 
-    public long Add(string rule, Severity severity, FindingAction action, string summary, string taken = "none", string profile = "Default")
+    public long Add(string rule, Severity severity, FindingAction action, string summary, string taken = "none", string profile = "Default", string target = "target")
     {
         using var store = new FindingStore(Database);
         return store.Add(
@@ -34,7 +34,7 @@ internal sealed class DataFolder : IDisposable
                 Action = action,
                 Summary = summary,
                 Profile = profile,
-                Target = "target",
+                Target = target,
                 Time = new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero),
             },
             taken);
@@ -187,7 +187,7 @@ public sealed class TrayModelTests : IDisposable
         Assert.Equal((TrayKind.Learning, "Learning mode: 'Client1' is watched, not protected"), (state.Kind, state.Headline));
         Assert.Equal("RCEGuard: learning mode for 'Client1' (not protected)", state.Tooltip);
         Assert.Contains("nothing is terminated, locked down or blocked", state.Detail);
-        Assert.Contains("\"learning\": false", state.Detail);
+        Assert.EndsWith("Choose another mode below when you are done.", state.Detail);
 
         var two = TrayState.From(LearningStatus(learning: 2, profiles: 3), 0);
         Assert.Equal("Learning mode: 'Client1', 'Client2' are watched, not protected", two.Headline);
@@ -307,6 +307,84 @@ public sealed class TrayModelTests : IDisposable
 
         Assert.False(new StatusReader(data.Path, () => ServiceState.Running).Read().KillEnabled);
         Assert.Equal((TrayKind.ReportOnly, "Report only: 'Warmane' is watched, nothing is terminated"), (viewModel.State.Kind, viewModel.State.Headline));
+    }
+
+    [Fact]
+    public void The_mode_is_read_from_the_configuration_and_explained()
+    {
+        // No configuration file: the installed client, in normal operation.
+        var viewModel = data.ViewModel();
+        viewModel.Refresh();
+        Assert.Equal((GuardMode.Protect, true), (viewModel.Mode, viewModel.CanSetMode));
+        Assert.Equal(GuardModes.Describe(GuardMode.Protect), viewModel.ModeHint);
+
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        data.Configure(""", "learning": true """);
+        viewModel.Refresh();
+        Assert.Equal(GuardMode.Learning, viewModel.Mode);
+        Assert.Contains(nameof(MainViewModel.Mode), changed);
+        Assert.Contains(nameof(MainViewModel.ModeHint), changed);
+
+        File.WriteAllText(Path.Combine(data.Path, "appsettings.json"), """{"killEnabled":false,"profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe"}]}""");
+        viewModel.Refresh();
+        Assert.Equal(GuardMode.ReportOnly, viewModel.Mode);
+
+        // Neither of the three: no button is pressed, and the line says why.
+        File.WriteAllText(Path.Combine(data.Path, "appsettings.json"), """{"killEnabled":false,"profiles":[{"name":"Warmane","clientPath":"C:\\Games\\Warmane\\Wow.exe","learning":true}]}""");
+        viewModel.Refresh();
+        Assert.Equal((null, true), (viewModel.Mode, viewModel.CanSetMode));
+        Assert.StartsWith("Mixed:", viewModel.ModeHint);
+
+        File.WriteAllText(Path.Combine(data.Path, "appsettings.json"), "{ not json");
+        viewModel.Refresh();
+        Assert.Equal((null, false), (viewModel.Mode, viewModel.CanSetMode));
+        Assert.Contains("cannot be read", viewModel.ModeHint);
+    }
+
+    [Fact]
+    public void The_commands_for_the_service_are_put_together_safely()
+    {
+        Assert.Equal("--set-mode protect", GuardCommand.ModeArguments(GuardMode.Protect));
+        Assert.Equal("--set-mode report-only", GuardCommand.ModeArguments(GuardMode.ReportOnly));
+        Assert.Equal("--set-mode learning", GuardCommand.ModeArguments(GuardMode.Learning));
+
+        Assert.Equal("--allow \"My Client\" 198.51.100.7", GuardCommand.AllowArguments("My Client", "198.51.100.7"));
+        Assert.Equal("--allow \"Warmane\" 2001:db8::7", GuardCommand.AllowArguments("Warmane", "2001:db8::7"));
+        // Nothing that is not an address gets on a command line that runs as administrator.
+        Assert.Null(GuardCommand.AllowArguments("Warmane", "198.51.100.7 --set-mode learning"));
+        Assert.Null(GuardCommand.AllowArguments("Warmane", "logon.example.org"));
+        Assert.Null(GuardCommand.AllowArguments(string.Empty, "198.51.100.7"));
+        // A quote cannot end the argument early, and a backslash at the end cannot swallow the closing quote.
+        Assert.Equal("--allow \"a --set-mode learning\" 198.51.100.7", GuardCommand.AllowArguments("a\" --set-mode learning", "198.51.100.7"));
+        Assert.Equal("\"name\\\\\"", GuardCommand.Quote("name\\"));
+
+        Assert.Equal("Protect", TrayIcon.ModeLabel(GuardMode.Protect));
+        Assert.Contains("nothing is terminated", TrayIcon.ModeLabel(GuardMode.ReportOnly));
+        Assert.Contains("not protected", TrayIcon.ModeLabel(GuardMode.Learning));
+    }
+
+    [Fact]
+    public void A_finding_about_a_connection_offers_its_address_and_every_finding_its_full_text()
+    {
+        data.Add("R2", Severity.Critical, FindingAction.Alert, "The game client connected to an address that is not on the allowlist: 198.51.100.20:8085", profile: "Warmane", target: "198.51.100.20:8085");
+        data.Add("R2", Severity.Info, FindingAction.Log, "Learning mode: the game client connected to [2001:db8::7]:3724", profile: "Warmane", target: "[2001:db8::7]:3724");
+        data.Add("R3", Severity.High, FindingAction.Alert, @"The game client created a program file: C:\Temp\a.exe", profile: "Warmane", target: @"C:\Temp\a.exe");
+        data.Add("R2", Severity.Critical, FindingAction.Alert, "something without an address", profile: "Warmane", target: "not an address:443");
+        var viewModel = data.ViewModel();
+        viewModel.Refresh();
+
+        // Newest first.
+        Assert.Equal([null, null, "2001:db8::7", "198.51.100.20"], viewModel.Findings.Select(finding => finding.AllowableAddress));
+
+        var detail = viewModel.Findings[3].DetailText;
+        Assert.Contains("Rule:                R2", detail);
+        Assert.Contains("Severity:            CRITICAL", detail);
+        Assert.Contains("Profile:             Warmane", detail);
+        Assert.Contains("What the guard did:  alert", detail);
+        Assert.Contains("Target:              198.51.100.20:8085", detail);
+        Assert.EndsWith("What happened:\nThe game client connected to an address that is not on the allowlist: 198.51.100.20:8085", detail);
+        Assert.DoesNotContain("Seen again", detail);
     }
 
     [Fact]

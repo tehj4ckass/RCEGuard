@@ -67,3 +67,14 @@ finding, and the tray application shows "report only" (`"killEnabled": false`) a
 with two bars. Tested with unit tests and in the guard loop with made-up events; the build was
 installed for the real client on 2026-11-16. **Not yet seen:** the scan as one finding at a start
 of the real client.
+
+**Added on 2026-11-16, later:** the mode of the guard (Protect, Report only, Learning) can be
+chosen in the window of the tray application and in the menu of its icon; a double click on a
+finding shows all of it, and for a connection it offers "Allow this address ...". Both changes
+are commands of the service (`--set-mode`, `--allow`) that Windows asks an administrator to
+confirm; they keep the configuration from before and restart the service. The service now keeps
+the list of running clients across a restart. Tested with unit tests (the commands with a
+stand-in for the restart of the Windows service), the published service ran the commands on a
+configuration in a temp folder, and the window was drawn into pictures and looked at. **Not yet
+run:** the commands as administrator against the installed service (the real restart), the
+administrator question from the tray application, and the menu of the icon.
