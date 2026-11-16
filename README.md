@@ -122,12 +122,13 @@ The details, with what was measured, are in [docs/DETECTION.md](docs/DETECTION.m
 | **M5** Learning mode, R7, R8 | built and accepted with the simulator; first sessions with a real client, see below |
 | Client file: check and optional patch | built; the patched client **could not log in** on the one server it was tried on |
 
-**With a real client so far:** one start in learning mode and two play sessions of about
-25 minutes together in "report only". No finding alerted, no connection left the allowlist.
+**With a real client so far:** one start in learning mode and three play sessions of about
+70 minutes together in "report only", the longest 47 minutes. No finding alerted, no connection
+left the allowlist, and the scan at the start of the client came up as one finding.
 
 **Not shown yet:**
 
-- two hours of normal play without a false alarm (the bar the concept sets);
+- two hours of normal play in one piece without a false alarm (the bar the concept sets);
 - the real client with terminating turned on (`"killEnabled": true`), with the firewall rule,
   the lockdown or Exploit Protection;
 - the service after the machine wakes from hibernation.

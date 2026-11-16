@@ -1470,6 +1470,25 @@ Offen ist, ob eine Verbindung, die offen bleibt, zuverlässig aufgezeichnet wird
   - *Nicht geprüft:* am installierten Dienst und mit dem echten Client. Der installierte Dienst ist noch der Stand
     vom 15.11.2026; den neuen bekommt er mit dem nächsten Lauf von `install.ps1`.
 
+- *Dritte Sitzung mit „nur melden“ (16.11.2026, 21:39:01 bis 22:26:27, 47 Minuten, ein Prozess).* Mit dem Stand
+  von 19:11 (Scan-Bündelung, Modusleiste). Ausgewertet aus `guard.log`, `findings.db`, `sysmon-position.json` und
+  den Zeitstempeln der Logdateien im Spielordner; das Sysmon-Log selbst nicht (braucht Administratorrechte).
+  - *Kein Alarm:* 3 Befunde, alle nur geloggt (2 R4 Info, 1 R7 MITTEL), dazu 13 gezählte Wiederholungen von R4 in
+    den ersten zwei Minuten. Kein R1, R2, R3, R5, R6, R8. 455 Sysmon-Ereignisse verarbeitet.
+  - *Der Scan als ein Befund, am echten Client bestätigt:* eine Zeile 4 s nach dem Ereignis, 38 Programme,
+    117 Zugriffe, Rechte `0x10` und `0x1410`. Kein zweiter Scan in 47 Minuten.
+  - *Erlaubnisliste hat gehalten:* keine Verbindung zu einer Adresse außerhalb, auch nicht nach 40 Minuten, als der
+    Client zum Anmeldebildschirm zurückging und wieder ins Spiel (Zeitstempel von `GlueXML.log` und `FrameXML.log`;
+    ob Verbindungsabbruch oder Abmelden, ist nicht belegt). Dabei eine Verbindung auf Port 80, die Sysmon nicht
+    aufgezeichnet hat und der Dienst aus der Verbindungstabelle nahm.
+  - *R8:* nicht gemeldet. Dass der Client dabei beobachtet wurde, zeigt die Zeile aus der Verbindungstabelle (sie
+    entsteht nur für einen Client, den der Dienst als laufend kennt). Ein Messwert der Last liegt nicht vor.
+  - *Zusammen mit den beiden Sitzungen davor:* rund 70 Minuten „nur melden“ ohne Alarm. Das Kriterium aus
+    Abschnitt 11 (zwei Stunden) ist am Stück nicht erreicht; der Inhaber schätzte die Sitzung auf etwa zwei Stunden,
+    belegt sind 47 Minuten mit diesem Client.
+  - *Nicht vorgekommen, also weiter ungeprüft:* „Allow this address ...“ (kein R2-Befund) und ein Neustart des
+    Dienstes bei laufendem Spiel.
+
 ## 21. Client-Datei: Prüfung und Patch-Skript (16.11.2026)
 
 **Entscheidung des Inhabers (16.11.2026):** Prüfung und Patch-Skript werden gebaut. Das ändert zwei Stellen dieses

@@ -82,3 +82,12 @@ times, 4 seconds apart, first with "Learning mode is ON", then with terminating 
 configuration held the same allowlist afterwards and the file from before the second change was
 kept as `appsettings.json.bak`. **Not yet run:** the menu of the icon, "Allow this address ..."
 on the installed service, and a restart while the real client runs.
+
+**Third play session in "report only" (2026-11-16, 21:39 to 22:26, 47 minutes, one process):**
+no finding alerted, no connection went to an address outside the allowlist (also not when the
+client went back to the login screen and into the game again after 40 minutes), and R8 did not
+report. The scan at the start came up as one finding 4 seconds after it (38 programs, 117
+accesses, read rights only); there was no second scan. The guard handled 455 Sysmon events and
+stored 3 findings, all only logged; one connection (port 80) was missed by Sysmon and taken from
+the connection table. With the two sessions before, that makes about 70 minutes in "report
+only" without an alert. **Still open:** two hours in one piece, and terminating turned on.
