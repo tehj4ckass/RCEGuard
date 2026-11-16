@@ -23,17 +23,7 @@ public enum ClientFileState
 /// <param name="State">What was found.</param>
 /// <param name="WritableExecutableSections">Names of the sections that are both writable and executable.</param>
 /// <param name="Problem">Why the file could not be read or is not a program; empty otherwise.</param>
-public sealed record ClientFileInfo(ClientFileState State, IReadOnlyList<string> WritableExecutableSections, string Problem)
-{
-    /// <summary>One sentence for a person about the client of a profile, or null if there is nothing to say.</summary>
-    public string? Describe(string profileName) => State switch
-    {
-        ClientFileState.HasWritableCode =>
-            $"The client of '{profileName}' has a section that is both writable and executable ({string.Join(", ", WritableExecutableSections)}): " +
-            "code that gets written there can run. See \"Patching the client\" in the README.",
-        _ => null,
-    };
-}
+public sealed record ClientFileInfo(ClientFileState State, IReadOnlyList<string> WritableExecutableSections, string Problem);
 
 /// <summary>
 /// Reads the section table of a program file (the file on disk, never a running process) and says

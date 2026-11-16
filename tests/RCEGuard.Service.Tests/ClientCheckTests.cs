@@ -1,21 +1,11 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using RCEGuard.Core.Client;
-
 namespace RCEGuard.Service.Tests;
 
-/// <summary>The look at the client file: the command, and the line the guard writes at its start.</summary>
+/// <summary>The look at the client file: the command that says what a client file is like.</summary>
 public sealed class ClientCheckTests : IDisposable
 {
     private readonly string folder = Directory.CreateTempSubdirectory("rceguard-clientcheck-").FullName;
 
-    public void Dispose()
-    {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(folder, recursive: true);
-    }
+    public void Dispose() => Directory.Delete(folder, recursive: true);
 
     /// <summary>The headers of a 32-bit program laid out like the 3.3.5a client's; the fourth section is ".zdata".</summary>
     internal static byte[] ClientFile(bool zdataExecutable)
@@ -101,68 +91,5 @@ public sealed class ClientCheckTests : IDisposable
         Assert.NotNull(options);
         Assert.Empty(error);
         Assert.Equal((check, withFile), (options.CheckClient, options.CheckClientPath is not null));
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task The_guard_says_at_its_start_if_the_client_has_such_a_section(bool executable)
-    {
-        var client = Write("Wow.exe", ClientFile(executable));
-        WriteConfig(client);
-        var logger = new ListLogger();
-        var worker = new GuardWorker(new ServiceOptions { DataDirectory = folder, LogName = "Application" }, logger, new Lifetime())
-        {
-            OpenFirewall = () => new FakeFirewall(),
-            DeliveryGrace = TimeSpan.FromSeconds(1),
-            OpenTail = (_, _, _, _) => new MemoryStream(),
-        };
-
-        await worker.StartAsync(CancellationToken.None);
-        var watch = Stopwatch.StartNew();
-        while (!logger.Lines.Any(line => line.Contains("Subscribed to") || line.Contains("cannot run")) && watch.ElapsedMilliseconds < 20_000)
-        {
-            await Task.Delay(50);
-        }
-
-        await worker.StopAsync(CancellationToken.None);
-        worker.Dispose();
-
-        Assert.DoesNotContain(logger.Lines, line => line.Contains("cannot run"));
-        var notes = logger.Lines.Where(line => line.Contains("both writable and executable")).ToList();
-        if (executable)
-        {
-            Assert.Equal("Warning: The client of 'Test' has a section that is both writable and executable (.zdata): code that gets written there can run. See \"Patching the client\" in the README.", Assert.Single(notes));
-        }
-        else
-        {
-            Assert.Empty(notes);
-        }
-    }
-
-    private sealed class ListLogger : ILogger<GuardWorker>
-    {
-        public ConcurrentQueue<string> Lines { get; } = new();
-
-        public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Lines.Enqueue($"{logLevel}: {formatter(state, exception)}");
-    }
-
-    private sealed class Lifetime : IHostApplicationLifetime
-    {
-        public CancellationToken ApplicationStarted => CancellationToken.None;
-
-        public CancellationToken ApplicationStopping => CancellationToken.None;
-
-        public CancellationToken ApplicationStopped => CancellationToken.None;
-
-        public void StopApplication()
-        {
-        }
     }
 }

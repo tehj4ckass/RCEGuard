@@ -1,5 +1,4 @@
 using System.Globalization;
-using RCEGuard.Core.Client;
 using RCEGuard.Core.Configuration;
 using RCEGuard.Core.Learning;
 using RCEGuard.Core.State;
@@ -31,7 +30,6 @@ internal enum ServiceState
 /// <param name="ToastEnabled">Whether new findings are shown as a pop-up.</param>
 /// <param name="Learned">What the learning mode noted, per profile; empty if there is nothing or it cannot be read.</param>
 /// <param name="CpuAlertCores">The processor load above which R8 reports (0: the rule is off).</param>
-/// <param name="ClientNotes">What there is to say about the client files themselves, one sentence each.</param>
 internal sealed record GuardStatus(
     ServiceState Service,
     IReadOnlyList<ClientProfile> Profiles,
@@ -40,8 +38,7 @@ internal sealed record GuardStatus(
     string? LockdownProblem,
     bool ToastEnabled,
     IReadOnlyList<LearnedProfile>? Learned = null,
-    double CpuAlertCores = 0,
-    IReadOnlyList<string>? ClientNotes = null)
+    double CpuAlertCores = 0)
 {
     /// <summary>The profiles in learning mode: their clients are watched, not protected.</summary>
     public IReadOnlyList<ClientProfile> Learning => [.. Profiles.Where(profile => profile.Learning)];
@@ -52,9 +49,6 @@ internal sealed class StatusReader
 {
     private readonly string dataDirectory;
     private readonly Func<ServiceState> serviceState;
-
-    // The status is read every two seconds; a client file is only read again when it has changed.
-    private readonly Dictionary<string, (DateTime Written, long Length, ClientFileInfo Info)> clientFiles = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Creates the reader.</summary>
     /// <param name="dataDirectory">Data folder of the service.</param>
@@ -91,42 +85,7 @@ internal sealed class StatusReader
         var locked = new LockdownFile(Path.Combine(dataDirectory, LockdownFile.FileName)).Load(out var lockdownProblem);
         // Notes that cannot be read are no notes: they are only shown.
         var learned = new LearnedFile(Path.Combine(dataDirectory, LearnedFile.FileName)).Load(out _);
-        var notes = new List<string>();
-        foreach (var profile in profiles)
-        {
-            if (InspectClient(profile.ClientPath).Describe(profile.Name) is { } note)
-            {
-                notes.Add(note);
-            }
-        }
-
-        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores, notes);
-    }
-
-    private ClientFileInfo InspectClient(string path)
-    {
-        try
-        {
-            var file = new FileInfo(path);
-            if (!file.Exists)
-            {
-                clientFiles.Remove(path);
-                return new ClientFileInfo(ClientFileState.Unreadable, [], "the file does not exist");
-            }
-
-            if (clientFiles.TryGetValue(path, out var known) && known.Written == file.LastWriteTimeUtc && known.Length == file.Length)
-            {
-                return known.Info;
-            }
-
-            var info = ClientFileInspector.InspectFile(path);
-            clientFiles[path] = (file.LastWriteTimeUtc, file.Length, info);
-            return info;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
-        {
-            return new ClientFileInfo(ClientFileState.Unreadable, [], ex.Message);
-        }
+        return new GuardStatus(serviceState(), profiles, configProblem, locked, lockdownProblem, toast, learned, cpuAlertCores);
     }
 
     private static ServiceState QueryService()

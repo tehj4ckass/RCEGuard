@@ -49,9 +49,6 @@ public class ClientFileTests
 
         Assert.Equal(ClientFileState.HasWritableCode, info.State);
         Assert.Equal([".zdata"], info.WritableExecutableSections);
-        Assert.Equal(
-            "The client of 'Warmane' has a section that is both writable and executable (.zdata): code that gets written there can run. See \"Patching the client\" in the README.",
-            info.Describe("Warmane"));
     }
 
     [Fact]
@@ -64,7 +61,6 @@ public class ClientFileTests
 
         Assert.Equal(ClientFileState.NoWritableCode, info.State);
         Assert.Empty(info.WritableExecutableSections);
-        Assert.Null(info.Describe("Warmane"));
     }
 
     [Fact]

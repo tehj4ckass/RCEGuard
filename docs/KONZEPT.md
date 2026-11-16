@@ -1508,3 +1508,8 @@ die Untersuchung in Abschnitt 18 und die Frage des Inhabers, ob es funktioniert 
     Anmeldungen bemerkt hat; wie sich andere Server verhalten.
   - *Zu den Fragen des Inhabers:* Als Administrator starten ändert nichts, der Absturz hat nichts mit Rechten zu
     tun. Der Client sollte ohnehin nie als Administrator laufen (Abschnitt 13, Regelidee „Client läuft mit High“).
+- *Dauerhinweis wieder herausgenommen (16.11.2026, Entscheidung des Inhabers nach dem Versuch).* Die Warnung im
+  Log bei jedem Start des Dienstes und die Zeile im Fenster der Tray-App sind entfernt: Auf einem Server, der den
+  Abschnitt zum Anmelden braucht, wären sie ein Hinweis ohne Abhilfe. Geblieben sind der einmalige Hinweis am Ende
+  von `install.ps1`, der Befehl `--check-client` und das Skript. Damit liest der laufende Dienst die Client-Datei
+  gar nicht mehr, und die Tray-App auch nicht. Tests danach: 285, 113, 34, alle grün.
