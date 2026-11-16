@@ -1592,6 +1592,12 @@ und benutzerfreundlich ist.
 - *Nicht geprüft:* die Befehle als Administrator am installierten Dienst (echter Neustart), die Administratorfrage
   aus der Tray-App, das Menü des Symbols (lässt sich nicht in ein Bild zeichnen), das Wiederaufnehmen eines echten
   laufenden Clients nach einem Neustart.
+- *Am installierten Dienst (16.11.2026, 20:06):* Der Inhaber hat im Fenster „Learning“ und danach „Report only“
+  geklickt und die Administratorfrage zweimal bestätigt. Nachgelesen: zwei Neustarts des Dienstes im Abstand von
+  4 s, der erste mit „Learning mode is ON“, der zweite mit „terminating processes is OFF“; Erlaubnisliste danach
+  unverändert (eine Adresse, drei Namen); `appsettings.json.bak` enthält den Stand vor der zweiten Änderung. Es gibt
+  nur diese eine Sicherungskopie: Die Datei von vor der ersten Änderung ist damit überschrieben. Weiter offen: das
+  Menü des Symbols, „Allow this address ...“ am installierten Dienst, ein Neustart bei laufendem echten Client.
 - *Am Rand:* Ein vorhandener Dienst-Test scheiterte einmal beim Aufräumen an einer noch geöffneten `findings.db`
   (in drei weiteren Läufen nicht). Vermutung, nicht belegt: Die Testklassen laufen nebeneinander und leeren alle den
   Verbindungspool von SQLite. Das Löschen des Testordners wird jetzt kurz wiederholt (`TestFolder.Delete`).

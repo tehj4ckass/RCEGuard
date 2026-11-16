@@ -75,6 +75,10 @@ are commands of the service (`--set-mode`, `--allow`) that Windows asks an admin
 confirm; they keep the configuration from before and restart the service. The service now keeps
 the list of running clients across a restart. Tested with unit tests (the commands with a
 stand-in for the restart of the Windows service), the published service ran the commands on a
-configuration in a temp folder, and the window was drawn into pictures and looked at. **Not yet
-run:** the commands as administrator against the installed service (the real restart), the
-administrator question from the tray application, and the menu of the icon.
+configuration in a temp folder, and the window was drawn into pictures and looked at. **Run on the
+installed service on 2026-11-16 20:06** (the owner clicked "Learning" and then "Report only" in
+the window and confirmed the administrator question twice): the service was restarted both
+times, 4 seconds apart, first with "Learning mode is ON", then with terminating off; the
+configuration held the same allowlist afterwards and the file from before the second change was
+kept as `appsettings.json.bak`. **Not yet run:** the menu of the icon, "Allow this address ..."
+on the installed service, and a restart while the real client runs.
