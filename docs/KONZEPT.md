@@ -1617,6 +1617,14 @@ und benutzerfreundlich ist.
   unverändert (eine Adresse, drei Namen); `appsettings.json.bak` enthält den Stand vor der zweiten Änderung. Es gibt
   nur diese eine Sicherungskopie: Die Datei von vor der ersten Änderung ist damit überschrieben. Weiter offen: das
   Menü des Symbols, „Allow this address ...“ am installierten Dienst, ein Neustart bei laufendem echten Client.
+- *Umstellung auf „Protect“ bei laufendem echten Client (16.11.2026, 22:32:41).* Der Inhaber hat nach der dritten
+  Sitzung ohne Alarm „Protect“ gewählt, drei Minuten nach dem Start des Spiels. Nachgelesen: Der Dienst meldet beim
+  Stoppen „stopping while WoW.exe is running“, läuft 1,2 s später wieder mit „terminating processes is ON“, nimmt
+  den laufenden Client aus `clients.json` wieder auf und führt 8 s danach dessen offene Verbindung aus der
+  Verbindungstabelle auf; sie steht auf der Erlaubnisliste, also kein Befund. Damit ist das Wiederaufnehmen eines
+  echten laufenden Clients belegt. In den 1,2 s dazwischen wurde nichts verpasst, was Sysmon aufzeichnet: Der Dienst
+  liest nach dem Start ab seiner gespeicherten Position weiter. `lockdown`, `firewall` und `killOnUnknownRemote`
+  bleiben aus. Offen: eine ganze Sitzung mit „Protect“.
 - *Am Rand:* Ein vorhandener Dienst-Test scheiterte einmal beim Aufräumen an einer noch geöffneten `findings.db`
   (in drei weiteren Läufen nicht). Vermutung, nicht belegt: Die Testklassen laufen nebeneinander und leeren alle den
   Verbindungspool von SQLite. Das Löschen des Testordners wird jetzt kurz wiederholt (`TestFolder.Delete`).

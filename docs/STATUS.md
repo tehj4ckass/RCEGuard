@@ -91,3 +91,12 @@ accesses, read rights only); there was no second scan. The guard handled 455 Sys
 stored 3 findings, all only logged; one connection (port 80) was missed by Sysmon and taken from
 the connection table. With the two sessions before, that makes about 70 minutes in "report
 only" without an alert. **Still open:** two hours in one piece, and terminating turned on.
+
+**Switched to "Protect" while the real client was running (2026-11-16 22:32):** the owner
+clicked "Protect" three minutes after the start of the game. The service stopped (it said so:
+"stopping while WoW.exe is running"), started again 1.2 seconds later with terminating ON, took
+the running client up again from its list ("1 client(s) that ran when the guard stopped are
+looked at again") and 8 seconds later listed the connection of that client that was open, from
+the connection table; it was on the allowlist, so there was no finding. That is the restart
+with a running client that had not been run before. **Still open:** a whole session in
+"Protect", "Allow this address ...", the menu of the icon.
